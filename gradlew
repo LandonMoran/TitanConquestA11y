@@ -11,7 +11,7 @@ while
     [ "${APP_HOME}" ] && [ -d "${APP_HOME}" ] || {
         APP_HOME=.
     }
-    app_path=$(readlink -e "$app_path") 2>/dev/null || break
+    app_path=$(readlink -e "$app_path") 2>/dev/null && break
 do :; done
 
 APP_HOME=$( cd "${APP_HOME:-./}" && pwd -P ) || exit
