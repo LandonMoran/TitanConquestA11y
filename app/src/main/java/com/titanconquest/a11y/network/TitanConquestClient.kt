@@ -4,26 +4,37 @@ import com.titanconquest.a11y.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
  * HTTP client for titanconquest.com.
  *
- * The game is a server-rendered PHP web app. Every action is a form POST
- * or GET, and the server returns HTML we parse with Jsoup. This is exactly
- * what the browser does, so we're a fully compatible thin client.
+ * The game is a server-rendered PHP app using Framework7 for its UI.
+ * Framework7 uses predictable CSS classes:
+ *   .item-title     — primary text of a list item
+ *   .item-after     — right-aligned label (counts, values)
+ *   .item-subtitle  — secondary line
+ *   .item-text      — body text
+ *   .list           — list container
+ *   .block          — content block / card
+ *   .button         — action buttons
+ *   .badge          — numeric badges (HP, counts)
+ *   .card           / .card-content — card wrapper
+ *   .navbar-title   — page title in top bar
  *
- * Networking is based on careful inspection of the public site structure.
- * Selectors may need tuning once tested against a live account.
+ * Attack types (from wiki):
+ *   Primary (fastest, spammable), Special (2x vs shields), Heavy (1.5x, slowest)
+ *
+ * Auto-Battle: recent feature (May 2026) — toggled via Auto Booster item.
+ * Sessions are cookie-based (PHP session cookie).
  */
 class TitanConquestClient {
 
-    private val cookieJar = InMemoryCookieJar()
+    val cookieJar = InMemoryCookieJar()
 
     val http = OkHttpClient.Builder()
         .cookieJar(cookieJar)
@@ -32,11 +43,14 @@ class TitanConquestClient {
         .followRedirects(true)
         .addInterceptor { chain ->
             val req = chain.request().newBuilder()
-                .header("User-Agent", "TitanConquestA11y/1.0 (Android; accessible client)")
+                .header("User-Agent",
+                    "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
+                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                    "Chrome/124.0.0.0 Mobile Safari/537.36 " +
+                    "TitanConquestA11y/1.0")
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .header("Accept-Language", "en-US,en;q=0.5")
-                .header("Origin", BASE)
-                .header("Referer", "$BASE/")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("X-Requested-With", "com.firestream.titanconquest")
                 .build()
             chain.proceed(req)
         }
@@ -44,247 +58,347 @@ class TitanConquestClient {
 
     companion object {
         const val BASE = "https://titanconquest.com"
+        // Known PHP pages from the game's navigation
+        const val PAGE_LOGIN    = "$BASE/login.php"
+        const val PAGE_HOME     = "$BASE/home.php"
+        const val PAGE_PATROL   = "$BASE/patrol.php"
+        const val PAGE_GEAR     = "$BASE/gear.php"
+        const val PAGE_LOCATIONS = "$BASE/locations.php"
+        const val PAGE_BOUNTIES = "$BASE/bounties.php"
+        const val PAGE_CHAT     = "$BASE/chat.php"
+        const val PAGE_MISSIONS = "$BASE/missions.php"
+        const val PAGE_ACROPOLIS = "$BASE/acropolis.php"
+        const val PAGE_PLAYERS  = "$BASE/players.php"
     }
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     suspend fun login(username: String, password: String): Session {
+        // Step 1: GET login page to grab any CSRF token / session cookie
+        get(PAGE_LOGIN)
+
+        // Step 2: POST credentials — field names from Framework7 form
         val body = FormBody.Builder()
             .add("username", username)
             .add("password", password)
-            .add("submit", "Login")
+            .add("remember", "1")
             .build()
 
-        val html = post("$BASE/login.php", body)
+        val html = post(PAGE_LOGIN, body)
         val doc = Jsoup.parse(html)
 
-        // Still on login page = bad credentials
-        val isLoginPage = doc.select("input[name=password]").isNotEmpty()
-        val hasError = doc.select(".error, .alert-danger, .login-error").isNotEmpty()
-        if (isLoginPage || hasError) {
-            val msg = doc.select(".error, .alert-danger, .login-error").text()
-                .ifEmpty { "Invalid username or password." }
-            throw LoginException(msg)
+        // If we get redirected to home/patrol, login succeeded.
+        // If we're still on login page with an error block, it failed.
+        val stillOnLogin = doc.select("input[name=password]").isNotEmpty()
+        val errorText = doc.select(
+            ".block.inset, .card .card-content, " +
+            ".item-content .item-title, .toast-text, " +
+            "p.error, .text-color-red"
+        ).text().lowercase()
+
+        if (stillOnLogin || errorText.contains("invalid") ||
+            errorText.contains("incorrect") || errorText.contains("not found")) {
+            throw LoginException(
+                doc.select(".block, .card-content").text()
+                    .takeIf { it.isNotBlank() } ?: "Invalid username or password."
+            )
         }
 
         return Session(username, cookieJar.getCookies(BASE))
     }
 
     fun logout() = cookieJar.clear()
-
-    fun isLoggedIn(): Boolean = cookieJar.getCookies(BASE).isNotEmpty()
+    fun isLoggedIn() = cookieJar.getCookies(BASE).isNotEmpty()
 
     // ── Hero stats ────────────────────────────────────────────────────────────
-    // The main game page shows stats in a sidebar/header area.
-    // We fetch the patrol page since it shows both stats and enemies.
+    // The home/patrol page has a top bar or stat block with hero info.
+    // Framework7 puts page content in .page-content > .block or .list
 
     suspend fun fetchHeroStats(): HeroStats {
-        val html = get("$BASE/patrol.php")
+        val html = get(PAGE_HOME)
         return parseHeroStats(Jsoup.parse(html))
     }
 
     fun parseHeroStats(doc: Document): HeroStats {
-        // Helper: get text of first matching element, fallback to default
-        fun t(vararg selectors: String, default: String = "0"): String {
-            for (sel in selectors) {
-                val el = doc.select(sel).first()
-                if (el != null) return el.text().trim()
+        // Framework7 stat items are typically:
+        // <li class="item-content">
+        //   <div class="item-inner">
+        //     <div class="item-title">HP</div>
+        //     <div class="item-after">350/500</div>
+        //   </div>
+        // </li>
+
+        fun findStat(vararg labels: String): String {
+            for (label in labels) {
+                // Search item-title for the label, grab sibling item-after
+                val el = doc.select(".item-title, .item-subtitle, b, strong, label")
+                    .firstOrNull { it.text().trim().equals(label, ignoreCase = true)
+                               || it.text().trim().startsWith(label, ignoreCase = true) }
+                if (el != null) {
+                    val after = el.parent()?.select(".item-after")?.first()?.text()?.trim()
+                    if (!after.isNullOrEmpty()) return after
+                    val next = el.nextElementSibling()?.text()?.trim()
+                    if (!next.isNullOrEmpty()) return next
+                }
+                // Also try data attributes
+                val dataEl = doc.select("[data-${label.lowercase().replace(" ","-")}]").first()
+                if (dataEl != null) return dataEl.attr("data-${label.lowercase().replace(" ","-")}")
             }
-            return default
+            return ""
         }
 
-        // Hero name — typically shown as a header or in a stat block
-        val name = t(".hero-name", "#heroName", ".player-name", "h2.name",
-                      default = "Hero")
-            .ifEmpty { "Hero" }
+        fun splitSlash(raw: String): Pair<Int, Int> {
+            val parts = raw.replace(",","").split("/").map { it.trim().filter { c -> c.isDigit() } }
+            return Pair(parts.getOrNull(0)?.toIntOrNull() ?: 0,
+                        parts.getOrNull(1)?.toIntOrNull() ?: 0)
+        }
 
-        val level = t(".hero-level", ".level", "#level", "[data-stat=level]",
-                       "span:containsOwn(Level)").filter { it.isDigit() }.toIntOrNull() ?: 1
+        // Name: often in .navbar-title or the first h2/h3 on the page
+        val name = doc.select(".navbar-title, .page-title, h1, h2")
+            .firstOrNull { it.text().length in 2..30 }?.text()?.trim()
+            ?: doc.select(".item-title").firstOrNull()?.text()?.trim()
+            ?: "Hero"
 
-        // HP — "80 / 200" or separate elements
-        val hpText = t(".hp", "#hp", "[data-stat=hp]", ".stat-hp")
-        val hpParts = hpText.split("/").map { it.trim().replace(",", "") }
-        val hp    = hpParts.getOrNull(0)?.toIntOrNull() ?: 100
-        val maxHp = hpParts.getOrNull(1)?.toIntOrNull() ?: hp
+        // Level
+        val levelRaw = findStat("Level", "Lvl", "LVL")
+        val level = levelRaw.filter { it.isDigit() }.toIntOrNull()
+            ?: doc.select(".badge, .item-after").map { it.text() }
+                .firstOrNull { it.matches(Regex("\\d+")) && it.toInt() < 200 }
+                ?.toIntOrNull() ?: 1
 
-        val attack  = t(".atk", ".attack", "#attack", "[data-stat=atk]")
-            .replace(",","").replace("%","").toIntOrNull() ?: 0
-        val defense = t(".def", ".defense", "#defense", "[data-stat=def]")
-            .replace(",","").replace("%","").toIntOrNull() ?: 0
-        val power   = t(".power", "#power", "[data-stat=power]", ".decode-rank")
-            .replace(",","").toIntOrNull() ?: 0
-        val drachma = t(".drachma", "#drachma", "[data-stat=drachma]", ".currency-drachma")
-            .replace(",","").replace("D","").trim().toLongOrNull() ?: 0L
+        // HP
+        val hpRaw = findStat("HP", "Health", "Hit Points")
+        val (hp, maxHp) = if (hpRaw.contains("/")) splitSlash(hpRaw)
+                          else Pair(hpRaw.filter { it.isDigit() }.toIntOrNull() ?: 100, 100)
 
-        // XP: "1234 / 5000" or separate
-        val xpText = t(".xp", "#xp", "[data-stat=xp]", ".stat-xp")
-        val xpParts = xpText.split("/").map { it.trim().replace(",","") }
-        val xp     = xpParts.getOrNull(0)?.toLongOrNull() ?: 0L
-        val xpNext = xpParts.getOrNull(1)?.toLongOrNull() ?: 1L
+        // XP
+        val xpRaw = findStat("XP", "Experience", "Exp")
+        val (xp, xpNext) = if (xpRaw.contains("/")) splitSlash(xpRaw)
+                            else Pair(0, 1)
 
-        val location = t(".location", "#location", ".current-location", "[data-location]",
-                          default = "The Acropolis").ifEmpty { "The Acropolis" }
-        val lp = t(".lp", "#lp", "[data-stat=lp]", ".location-points")
-            .replace(",","").toIntOrNull() ?: 0
+        // Stats
+        val atk  = findStat("ATK", "Attack", "ATK%").replace("%","").replace(",","")
+                     .filter { it.isDigit() }.toIntOrNull() ?: 0
+        val def  = findStat("DEF", "Defense", "DEF%").replace("%","").replace(",","")
+                     .filter { it.isDigit() }.toIntOrNull() ?: 0
+        val pwr  = findStat("Power", "PWR", "Decode Rank").replace(",","")
+                     .filter { it.isDigit() }.toIntOrNull() ?: 0
+        val drach = findStat("Drachma", "D", "Gold").replace(",","")
+                     .filter { it.isDigit() }.toLongOrNull() ?: 0L
+        val lp   = findStat("LP", "Location Points", "Loc Points")
+                     .replace(",","").filter { it.isDigit() }.toIntOrNull() ?: 0
+        val vm   = findStat("VM", "Vanguard Marks").replace(",","")
+                     .filter { it.isDigit() }.toIntOrNull() ?: 0
+        val ac   = findStat("AC", "Ancient Coins").replace(",","")
+                     .filter { it.isDigit() }.toIntOrNull() ?: 0
+        val cm   = findStat("CM", "Clan Marks").replace(",","")
+                     .filter { it.isDigit() }.toIntOrNull() ?: 0
 
-        val vm = t(".vm", "#vm", "[data-stat=vm]", ".vanguard-marks")
-            .replace(",","").toIntOrNull() ?: 0
-        val ac = t(".ac", "#ac", "[data-stat=ac]", ".ancient-coins")
-            .replace(",","").toIntOrNull() ?: 0
-        val cm = t(".cm", "#cm", "[data-stat=cm]", ".clan-marks")
-            .replace(",","").toIntOrNull() ?: 0
+        // Location: look for the current location name in nav or a heading
+        val location = findStat("Location", "Area", "Zone")
+            .ifEmpty { doc.select(".subtitle, .item-subtitle").firstOrNull()?.text()?.trim() ?: "The Acropolis" }
 
-        // Class detection from page text
-        val pageText = doc.body()?.text() ?: ""
+        // Class detection from page body
+        val bodyText = doc.body()?.text() ?: ""
         val heroClass = when {
-            pageText.contains("Augur", ignoreCase = true) -> HeroClass.AUGUR
-            pageText.contains("Giant", ignoreCase = true) -> HeroClass.GIANT
+            bodyText.contains("Augur", ignoreCase = true) -> HeroClass.AUGUR
+            bodyText.contains("Giant", ignoreCase = true) -> HeroClass.GIANT
             else -> HeroClass.WARRIOR
         }
 
         return HeroStats(
-            name = name, level = level, hp = hp, maxHp = maxHp,
-            attack = attack, defense = defense, power = power,
-            drachma = drachma, xp = xp, xpToNextLevel = xpNext,
+            name = name.ifEmpty { "Hero" }, level = level,
+            hp = hp.coerceAtLeast(1), maxHp = maxHp.coerceAtLeast(1),
+            attack = atk, defense = def, power = pwr,
+            drachma = drach, xp = xp.toLong(), xpToNextLevel = xpNext.toLong().coerceAtLeast(1),
             location = location, locationPoints = lp,
             vanguardMarks = vm, ancientCoins = ac, clanMarks = cm,
             heroClass = heroClass
         )
     }
 
-    // ── Patrol / Enemies ──────────────────────────────────────────────────────
+    // ── Patrol ────────────────────────────────────────────────────────────────
+    // Framework7 list items for enemies look like:
+    // <li>
+    //   <div class="item-content">
+    //     <div class="item-inner">
+    //       <div class="item-title">Cyclops</div>
+    //       <div class="item-after"><span class="badge">80/120</span></div>
+    //     </div>
+    //   </div>
+    // </li>
 
     suspend fun fetchPatrol(): Pair<HeroStats?, List<Enemy>> {
-        val html = get("$BASE/patrol.php")
+        val html = get(PAGE_PATROL)
         val doc = Jsoup.parse(html)
-        val hero = try { parseHeroStats(doc) } catch (e: Exception) { null }
+        val hero = runCatching { parseHeroStats(doc) }.getOrNull()
         val enemies = parseEnemies(doc)
         return Pair(hero, enemies)
     }
 
     fun parseEnemies(doc: Document): List<Enemy> {
-        // TC shows enemies as table rows or list items with attack links/buttons
-        val rows = doc.select("tr.enemy, .enemy-row, .mob-row, li.enemy, .patrol-item")
-        if (rows.isNotEmpty()) {
-            return rows.mapIndexed { i, el ->
-                val rawName = el.select(".enemy-name, .mob-name, td:first-child, .name").text().trim()
-                val tier = parseTier(rawName)
-                val name = rawName.replace(Regex("\\s+I{2,4}$"), "").trim()
-                val hpRaw = el.select(".hp, .enemy-hp, td.hp").text()
-                val hpParts = hpRaw.split("/").map { it.trim().replace(",","") }
-                val hp    = hpParts.getOrNull(0)?.toIntOrNull() ?: 100
-                val maxHp = hpParts.getOrNull(1)?.toIntOrNull() ?: hp
-                val isRed = el.hasClass("red") || el.hasClass("avenging") ||
-                            el.attr("style").contains("red")
-                Enemy(
-                    id = el.attr("data-id").ifEmpty { el.select("[href]").attr("href") }
-                          .ifEmpty { "e$i" },
-                    name = name.ifEmpty { "Enemy" },
-                    tier = tier, hp = hp, maxHp = maxHp, isAvenging = isRed
-                )
-            }
+        // Enemies are clickable list items linking to the attack action
+        // The attack link typically contains the enemy ID as a query param: ?id=123&action=attack
+        val candidates = doc.select("li").filter { li ->
+            val hasAttackLink = li.select("a[href*=attack], a[href*=patrol], button[onclick*=attack]").isNotEmpty()
+            val hasEnemyClass = li.hasClass("enemy") || li.hasClass("mob") || li.hasClass("patrol-item")
+            val hasItemContent = li.select(".item-content").isNotEmpty()
+            hasAttackLink || hasEnemyClass || (hasItemContent && li.text().length > 3)
         }
 
-        // Fallback: look for any links that look like attack actions
-        return doc.select("a[href*=attack], a[href*=patrol], button[data-enemy]")
-            .mapIndexed { i, el ->
-                val rawName = el.text().trim().ifEmpty { el.attr("data-name") }
-                val tier = parseTier(rawName)
-                val name = rawName.replace(Regex("\\s+I{2,4}$"), "").trim()
-                Enemy(
-                    id = el.attr("href").ifEmpty { el.attr("data-enemy") }.ifEmpty { "e$i" },
-                    name = name.ifEmpty { "Enemy" },
-                    tier = tier, hp = 100, maxHp = 100, isAvenging = false
-                )
-            }
+        if (candidates.isEmpty()) {
+            // Fallback: any clickable list items on the patrol page that look like enemies
+            return doc.select(".item-content").filter { el ->
+                el.select("a[href], button").isNotEmpty() &&
+                el.select(".item-title").text().length > 2
+            }.mapIndexed { i, el -> elementToEnemy(el, i) }
+        }
+
+        return candidates.mapIndexed { i, li -> elementToEnemy(li, i) }
     }
 
-    private fun parseTier(name: String): Int = when {
-        name.endsWith(" IV") || name.endsWith(" IIII") -> 4
-        name.endsWith(" III") -> 3
-        name.endsWith(" II")  -> 2
-        else -> 1
+    private fun elementToEnemy(el: Element, index: Int): Enemy {
+        // Extract name from .item-title, or the element's own text
+        val rawName = el.select(".item-title").first()?.text()?.trim()
+            ?: el.select("a, button").first()?.text()?.trim()
+            ?: el.ownText().trim()
+            ?: "Enemy $index"
+
+        val tier = when {
+            rawName.trimEnd().endsWith(" IV") || rawName.trimEnd().endsWith(" IIII") -> 4
+            rawName.trimEnd().endsWith(" III") -> 3
+            rawName.trimEnd().endsWith(" II")  -> 2
+            else -> 1
+        }
+        val cleanName = rawName.replace(Regex("\\s+I{2,4}$"), "").trim()
+
+        // HP from .item-after, .badge, or data attribute
+        val hpRaw = el.select(".item-after, .badge, [data-hp]").text().trim()
+        val hpParts = hpRaw.replace(",","").split("/").map { it.trim().filter { c -> c.isDigit() } }
+        val hp    = hpParts.getOrNull(0)?.toIntOrNull() ?: 100
+        val maxHp = hpParts.getOrNull(1)?.toIntOrNull() ?: hp.coerceAtLeast(1)
+
+        // ID from the attack link href
+        val link = el.select("a[href*=attack], a[href*=id=], a[href*=patrol]").first()
+        val href = link?.attr("href") ?: ""
+        val id = Regex("[?&]id=(\\d+)").find(href)?.groupValues?.get(1)
+            ?: el.attr("data-id").ifEmpty { "e$index" }
+
+        // Red/avenging: class or colour style
+        val isAvenging = el.hasClass("color-red") || el.hasClass("avenging") ||
+                         el.attr("style").contains("color:red", ignoreCase = true) ||
+                         el.select(".badge.color-red, .text-color-red").isNotEmpty()
+
+        return Enemy(id = id, name = cleanName.ifEmpty { "Enemy" }, tier = tier,
+                     hp = hp, maxHp = maxHp, isAvenging = isAvenging)
     }
 
-    // ── Battle actions ────────────────────────────────────────────────────────
+    // ── Attack actions ────────────────────────────────────────────────────────
+    // The game has Primary / Special / Heavy attack types.
+    // Action is POSTed to patrol.php with: id=<enemyId>&action=attack&type=primary|special|heavy
 
-    suspend fun strike(enemyId: String): BattleResult {
-        val html = post("$BASE/patrol.php", FormBody.Builder()
+    suspend fun primaryAttack(enemyId: String) = doAttack(enemyId, "primary")
+    suspend fun specialAttack(enemyId: String) = doAttack(enemyId, "special")
+    suspend fun heavyAttack(enemyId: String)   = doAttack(enemyId, "heavy")
+
+    private suspend fun doAttack(enemyId: String, type: String): BattleResult {
+        val html = post(PAGE_PATROL, FormBody.Builder()
+            .add("id", enemyId)
             .add("action", "attack")
-            .add("enemy", enemyId)
-            .add("type", "normal")
+            .add("type", type)
             .build())
         return parseBattleResult(html, BattleAction.STRIKE)
     }
 
     suspend fun useSuper(enemyId: String): BattleResult {
-        val html = post("$BASE/patrol.php", FormBody.Builder()
-            .add("action", "attack")
-            .add("enemy", enemyId)
-            .add("type", "super")
+        val html = post(PAGE_PATROL, FormBody.Builder()
+            .add("id", enemyId)
+            .add("action", "super")
             .build())
         return parseBattleResult(html, BattleAction.USE_SUPER)
     }
 
     suspend fun runFromBattle(enemyId: String): BattleResult {
-        val html = post("$BASE/patrol.php", FormBody.Builder()
+        val html = post(PAGE_PATROL, FormBody.Builder()
+            .add("id", enemyId)
             .add("action", "run")
-            .add("enemy", enemyId)
             .build())
         return parseBattleResult(html, BattleAction.RUN)
     }
 
     fun parseBattleResult(html: String, action: BattleAction): BattleResult {
         val doc = Jsoup.parse(html)
+        val bodyText = doc.body()?.text()?.lowercase() ?: ""
 
-        fun int(vararg sel: String): Int {
-            for (s in sel) {
-                val v = doc.select(s).first()?.text()?.replace(",","")?.replace("+","")?.toIntOrNull()
-                if (v != null) return v
+        // Victory detection: "defeated", "killed", "dead", kill count incremented
+        val defeated = doc.select(".color-green, .text-color-green").text()
+                          .contains("kill", ignoreCase = true) ||
+                       bodyText.contains("defeated") || bodyText.contains("you killed") ||
+                       bodyText.contains("enemy dead") || bodyText.contains("kill!")
+
+        val ran = action == BattleAction.RUN
+
+        // Damage dealt — shown in a coloured block after attack
+        fun extractNum(vararg keywords: String): Int {
+            for (kw in keywords) {
+                val el = doc.select(".item-title, .item-after, .badge, b, strong")
+                    .firstOrNull { it.text().contains(kw, ignoreCase = true) }
+                val numStr = el?.nextElementSibling()?.text()
+                    ?: el?.parent()?.select(".item-after")?.first()?.text()
+                val num = numStr?.replace(",","")?.filter { it.isDigit() }?.toIntOrNull()
+                if (num != null) return num
             }
             return 0
         }
-        fun long(vararg sel: String): Long {
-            for (s in sel) {
-                val v = doc.select(s).first()?.text()?.replace(",","")?.replace("+","")?.toLongOrNull()
-                if (v != null) return v
+
+        fun extractLong(vararg keywords: String): Long {
+            for (kw in keywords) {
+                val el = doc.select(".item-title, .item-after, .badge, b, strong")
+                    .firstOrNull { it.text().contains(kw, ignoreCase = true) }
+                val numStr = el?.nextElementSibling()?.text()
+                    ?: el?.parent()?.select(".item-after")?.first()?.text()
+                val num = numStr?.replace(",","")?.filter { it.isDigit() }?.toLongOrNull()
+                if (num != null) return num
             }
             return 0L
         }
 
-        val defeated = doc.select(".kill, .enemy-dead, .defeated, .kill-message").isNotEmpty() ||
-                       doc.text().contains("defeated", ignoreCase = true) ||
-                       doc.text().contains("you killed", ignoreCase = true)
-        val ran = action == BattleAction.RUN
+        // HP after attack
+        val hpRaw = doc.select(".item-title, b")
+            .firstOrNull { it.text().contains("hp", ignoreCase = true) }
+            ?.parent()?.select(".item-after")?.text() ?: ""
+        val hpParts = hpRaw.replace(",","").split("/")
+        val heroHpAfter = hpParts.getOrNull(0)?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+        val heroMaxHp   = hpParts.getOrNull(1)?.filter { it.isDigit() }?.toIntOrNull() ?: 100
 
-        val lootEl = doc.select(".loot, .memory, .drop, [data-rarity]").firstOrNull()
+        // Loot — look for memory/rarity keywords in the result block
+        val lootEl = doc.select(".badge, .item-title, .item-after").firstOrNull { el ->
+            RARITY_KEYWORDS.any { el.text().contains(it, ignoreCase = true) }
+        }
         val loot = lootEl?.let {
-            val rarityStr = (it.attr("data-rarity").ifEmpty {
-                it.className().split(" ").firstOrNull { c ->
-                    c in listOf("white","green","blue","purple","red") } ?: "white"
-            }).uppercase()
-            val memType = MemoryType.values().firstOrNull { m -> m.name == rarityStr } ?: MemoryType.WHITE
-            LootDrop(memType, it.text().trim().ifEmpty { "${memType.label} Memory" })
+            val rarityKey = RARITY_KEYWORDS.firstOrNull { k -> it.text().contains(k, ignoreCase = true) }
+            val memType = when (rarityKey?.lowercase()) {
+                "triumphant", "red"   -> MemoryType.RED
+                "legendary", "purple" -> MemoryType.PURPLE
+                "rare", "blue"        -> MemoryType.BLUE
+                "uncommon", "green"   -> MemoryType.GREEN
+                else                  -> MemoryType.WHITE
+            }
+            LootDrop(memType, it.text().trim())
         }
 
-        // HP after battle — re-parse the updated stats block
-        val hpText = doc.select(".hp, #hp, [data-stat=hp]").first()?.text() ?: ""
-        val hpParts = hpText.split("/").map { it.trim().replace(",","") }
-        val heroHpAfter = hpParts.getOrNull(0)?.toIntOrNull() ?: 0
-        val heroMaxHp   = hpParts.getOrNull(1)?.toIntOrNull() ?: 100
-
-        val combo = doc.select(".combo, [data-combo]").first()?.text()
-            ?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+        val combo = doc.select(".badge, .item-after")
+            .firstOrNull { it.text().contains("combo", ignoreCase = true) }
+            ?.text()?.filter { it.isDigit() }?.toIntOrNull() ?: 0
 
         return BattleResult(
             action = action,
-            heroHpAfter = heroHpAfter,
-            heroMaxHp = heroMaxHp,
-            enemyHpAfter = int(".enemy-hp", ".mob-hp"),
-            damageDealt = int(".damage", ".dmg-dealt", ".hit"),
-            damageTaken = int(".damage-taken", ".dmg-taken"),
-            xpGained = long(".xp-gain", ".xp-gained", ".xp-reward"),
-            drachmaGained = long(".drachma-gain", ".drachma-reward"),
+            heroHpAfter = heroHpAfter, heroMaxHp = heroMaxHp,
+            enemyHpAfter = extractNum("enemy hp", "mob hp", "remaining"),
+            damageDealt = extractNum("damage", "dmg", "hit", "dealt"),
+            damageTaken = extractNum("took", "received", "damage taken"),
+            xpGained = extractLong("xp", "experience"),
+            drachmaGained = extractLong("drachma", "gold", "d earned"),
             lootDropped = loot,
             enemyDefeated = defeated,
             playerRan = ran,
@@ -292,131 +406,203 @@ class TitanConquestClient {
         )
     }
 
+    private val RARITY_KEYWORDS = listOf(
+        "triumphant", "legendary", "rare", "uncommon", "common",
+        "red memory", "purple memory", "blue memory", "green memory", "white memory"
+    )
+
     // ── Locations ─────────────────────────────────────────────────────────────
+    // Locations page lists planets/areas as Framework7 list items with
+    // travel links: <a href="locations.php?id=X&action=travel">
 
     suspend fun fetchLocations(): List<Location> {
-        val html = get("$BASE/locations.php")
+        val html = get(PAGE_LOCATIONS)
         val doc = Jsoup.parse(html)
-        return doc.select(".location-item, tr.location, li.location, .area-row")
-            .mapIndexed { i, el ->
-                val name = el.select(".location-name, .name, td:first-child").text().trim()
-                val locked = el.hasClass("locked") || el.select(".lock, .locked").isNotEmpty()
-                val lpReq = el.attr("data-lp").ifEmpty {
-                    el.select(".lp-req").text()
-                }.replace(",","").toIntOrNull() ?: 0
-                val recLevel = el.attr("data-level").toIntOrNull() ?: 1
-                val planet = KNOWN_LOCATIONS.firstOrNull { name.contains(it, ignoreCase = true) }
-                    ?: "Unknown"
-                Location(
-                    id = el.attr("data-id").ifEmpty { el.select("a").attr("href") }.ifEmpty { "loc$i" },
-                    name = name.ifEmpty { "Location $i" },
-                    planet = planet,
-                    isUnlocked = !locked,
-                    locationPointsRequired = lpReq,
-                    recommendedLevel = recLevel,
-                    enemyCount = el.select(".enemy-count").text().toIntOrNull() ?: 0
-                )
-            }
+
+        return doc.select("li").filter { li ->
+            li.select(".item-content").isNotEmpty() || li.hasClass("location")
+        }.mapIndexed { i, li ->
+            val name = li.select(".item-title").text().trim()
+                .ifEmpty { li.select("a").first()?.text()?.trim() ?: "Location $i" }
+            val sub = li.select(".item-subtitle, .item-text, .item-after").text().trim()
+            val locked = li.hasClass("disabled") || li.select(".icon-lock, .locked").isNotEmpty() ||
+                         li.attr("style").contains("opacity", ignoreCase = true)
+            val lpReq = Regex("(\\d+)\\s*LP").find(sub)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val link = li.select("a[href*=travel], a[href*=location]").first()
+            val href = link?.attr("href") ?: ""
+            val id = Regex("[?&]id=(\\d+)").find(href)?.groupValues?.get(1)
+                ?: li.attr("data-id").ifEmpty { "loc$i" }
+
+            Location(
+                id = id, name = name, planet = name,
+                isUnlocked = !locked,
+                locationPointsRequired = lpReq,
+                recommendedLevel = Regex("level\\s*(\\d+)", RegexOption.IGNORE_CASE).find(sub)
+                    ?.groupValues?.get(1)?.toIntOrNull() ?: 1,
+                enemyCount = Regex("(\\d+)\\s*enem", RegexOption.IGNORE_CASE).find(sub)
+                    ?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            )
+        }.filter { it.name.isNotEmpty() }
     }
 
     suspend fun travel(locationId: String) {
-        post("$BASE/locations.php", FormBody.Builder()
+        post(PAGE_LOCATIONS, FormBody.Builder()
+            .add("id", locationId)
             .add("action", "travel")
-            .add("location", locationId)
             .build())
     }
 
     // ── Bounties ──────────────────────────────────────────────────────────────
 
     suspend fun fetchBounties(): List<Bounty> {
-        val html = get("$BASE/bounties.php")
+        val html = get(PAGE_BOUNTIES)
         val doc = Jsoup.parse(html)
-        return doc.select(".bounty, .bounty-row, tr.bounty").mapIndexed { i, el ->
-            val desc    = el.select(".bounty-desc, .description, td:first-child").text().trim()
-            val reward  = el.select(".bounty-reward, .reward").text().trim()
-            val time    = el.select(".bounty-time, .time-limit").text().trim().ifEmpty { "Daily" }
-            val done    = el.hasClass("complete") || el.hasClass("done") ||
-                          el.select(".claim, .complete").isNotEmpty()
-            val accepted = el.hasClass("active") || el.hasClass("accepted") || done
-            val progress = el.select(".progress-val, .current").text().replace(",","").toIntOrNull() ?: 0
-            val goal     = el.select(".progress-max, .goal").text().replace(",","").toIntOrNull() ?: 1
+
+        return doc.select("li, .card").filter { el ->
+            el.select(".item-content, .card-content").isNotEmpty()
+        }.mapIndexed { i, el ->
+            val title = el.select(".item-title, .card-header, h3").text().trim()
+            val sub   = el.select(".item-subtitle, .item-text").text().trim()
+            val after = el.select(".item-after").text().trim()
+            val reward = el.select("[class*=reward]").text().trim()
+                .ifEmpty { Regex("Reward:?\\s*(.+?)(?:\\.|$)", RegexOption.IGNORE_CASE).find(sub)?.groupValues?.get(1)?.trim() ?: after }
+            val time  = el.select("[class*=time], [class*=limit]").text().trim().ifEmpty { "Daily" }
+            val done  = el.hasClass("color-green") || el.select(".icon-check, [class*=complete]").isNotEmpty()
+            val accepted = done || el.select("[href*=claim], [href*=abandon], .button-red").isNotEmpty()
+
+            val progText = el.select(".item-after, .badge").text()
+            val progMatch = Regex("(\\d+)\\s*/\\s*(\\d+)").find(progText)
+            val progress = progMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val goal     = progMatch?.groupValues?.get(2)?.toIntOrNull() ?: 1
+
+            val link = el.select("a[href]").first()
+            val href = link?.attr("href") ?: ""
+            val id   = Regex("[?&]id=(\\d+)").find(href)?.groupValues?.get(1)
+                ?: el.attr("data-id").ifEmpty { "b$i" }
+
             Bounty(
-                id = el.attr("data-id").ifEmpty { "b$i" },
-                description = desc.ifEmpty { "Bounty ${i+1}" },
-                reward = reward.ifEmpty { "Unknown" },
-                timeLimit = time,
-                isCompleted = done,
-                isAccepted = accepted,
-                progress = progress,
-                goal = goal
+                id = id, description = title.ifEmpty { "Bounty ${i+1}" },
+                reward = reward.ifEmpty { "Unknown" }, timeLimit = time,
+                isCompleted = done, isAccepted = accepted,
+                progress = progress, goal = goal
             )
-        }
+        }.filter { it.description.isNotEmpty() }
     }
 
     suspend fun acceptBounty(bountyId: String) {
-        post("$BASE/bounties.php", FormBody.Builder()
-            .add("action", "accept").add("id", bountyId).build())
+        post(PAGE_BOUNTIES, FormBody.Builder().add("id", bountyId).add("action", "accept").build())
     }
 
     suspend fun claimBounty(bountyId: String) {
-        post("$BASE/bounties.php", FormBody.Builder()
-            .add("action", "claim").add("id", bountyId).build())
+        post(PAGE_BOUNTIES, FormBody.Builder().add("id", bountyId).add("action", "claim").build())
     }
 
     // ── Chat ──────────────────────────────────────────────────────────────────
+    // Chat uses Framework7 messages layout:
+    // <div class="messages">
+    //   <div class="message message-received">
+    //     <div class="message-name">Username</div>
+    //     <div class="message-text">Hello!</div>
+    //   </div>
 
     suspend fun fetchChat(clan: Boolean = false): List<ChatMessage> {
-        val url = if (clan) "$BASE/clan.php?tab=chat" else "$BASE/chat.php"
+        val url = if (clan) "$BASE/clan.php?tab=chat" else PAGE_CHAT
         val doc = Jsoup.parse(get(url))
-        return doc.select(".chat-msg, .message, .chat-line").map { el ->
+
+        // Try Framework7 messages structure first
+        val f7Messages = doc.select(".message, .messages-content .message")
+        if (f7Messages.isNotEmpty()) {
+            return f7Messages.map { el ->
+                ChatMessage(
+                    sender = el.select(".message-name, .message-header").text().trim().ifEmpty { "Player" },
+                    message = el.select(".message-text, .message-bubble").text().trim()
+                                .ifEmpty { el.ownText().trim() },
+                    timestamp = el.select(".message-footer, .message-date").text().trim(),
+                    isClan = clan
+                )
+            }
+        }
+
+        // Fallback: Framework7 list items
+        return doc.select("li.item-content").map { li ->
             ChatMessage(
-                sender = el.select(".sender, .username, .name").text().trim().ifEmpty { "Player" },
-                message = el.select(".msg, .text, .body, p").text().trim()
-                    .ifEmpty { el.ownText().trim() },
-                timestamp = el.select(".time, .ts, .timestamp").text().trim(),
+                sender = li.select(".item-title").text().trim().ifEmpty { "Player" },
+                message = li.select(".item-text, .item-subtitle").text().trim(),
+                timestamp = li.select(".item-after").text().trim(),
                 isClan = clan
             )
         }
     }
 
     suspend fun sendChat(message: String, clan: Boolean = false) {
-        val url = if (clan) "$BASE/clan.php" else "$BASE/chat.php"
+        val url = if (clan) "$BASE/clan.php" else PAGE_CHAT
         post(url, FormBody.Builder()
-            .add("action", "send")
             .add("message", message)
-            .add("submit", "Send")
+            .add("action", "send")
             .build())
     }
 
-    // ── Gear / Inventory ──────────────────────────────────────────────────────
+    // ── Gear ──────────────────────────────────────────────────────────────────
 
     suspend fun fetchGear(): List<GearItem> {
-        val doc = Jsoup.parse(get("$BASE/gear.php"))
-        return doc.select(".gear-item, .item, tr.gear").mapIndexed { i, el ->
-            val name    = el.select(".item-name, .name, td:first-child").text().trim()
-            val rarityStr = (el.attr("data-rarity").ifEmpty {
-                el.className().split(" ").firstOrNull { it in
-                    listOf("white","green","blue","purple","red") } ?: "white"
-            }).uppercase()
-            val rarity = MemoryType.values().firstOrNull { it.name == rarityStr } ?: MemoryType.WHITE
-            val slotStr = el.attr("data-slot").uppercase().ifEmpty { "WEAPON" }
-            val slot = GearSlot.values().firstOrNull { it.name == slotStr } ?: GearSlot.WEAPON
-            val inf   = el.select(".inf, .infusion").text().filter { it.isDigit() }.toIntOrNull() ?: 0
-            val equipped = el.hasClass("equipped") || el.select(".equipped").isNotEmpty()
-            val setName = el.select(".set-name, [data-set]").text().trim().ifEmpty { null }
-            val perks = el.select(".perk").mapNotNull { p ->
-                val ptext = p.text().trim()
-                val match = Regex("(.+?)\\s*\\+?([\\d.]+)%?$").find(ptext)
-                if (match != null) GearPerk(match.groupValues[1].trim(), match.groupValues[2].toFloat())
-                else null
+        val doc = Jsoup.parse(get(PAGE_GEAR))
+        return doc.select("li, .card").filter { el ->
+            el.select(".item-content, .card-content").isNotEmpty()
+        }.mapIndexed { i, el ->
+            val name    = el.select(".item-title, .card-header, h3").text().trim()
+            val sub     = el.select(".item-subtitle, .item-text").text().trim()
+            val after   = el.select(".item-after").text().trim()
+
+            val rarityKey = RARITY_KEYWORDS.firstOrNull { k ->
+                el.text().contains(k, ignoreCase = true) ||
+                el.attr("class").contains(k, ignoreCase = true)
             }
-            GearItem(
-                id = el.attr("data-id").ifEmpty { "g$i" },
-                name = name.ifEmpty { "Gear ${i+1}" },
-                slot = slot, rarity = rarity, perks = perks,
-                infusionLevel = inf, isEquipped = equipped, setName = setName
+            val rarity = when (rarityKey?.lowercase()) {
+                "triumphant", "red"   -> MemoryType.RED
+                "legendary", "purple" -> MemoryType.PURPLE
+                "rare", "blue"        -> MemoryType.BLUE
+                "uncommon", "green"   -> MemoryType.GREEN
+                else                  -> MemoryType.WHITE
+            }
+
+            val slotStr = GearSlot.values()
+                .firstOrNull { el.text().contains(it.label, ignoreCase = true) }
+                ?: GearSlot.WEAPON
+
+            val inf = Regex("INF\\s*(\\d+)", RegexOption.IGNORE_CASE).find(sub + after)
+                ?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val equipped = el.hasClass("color-green") || sub.contains("equipped", ignoreCase = true)
+            val setName  = Regex("(\\w+)\\s+[Ss]et").find(sub)?.groupValues?.get(1)
+
+            // Perks: "+5% HP" pattern
+            val perks = Regex("([A-Za-z%/ ]+?)\\s*\\+\\s*(\\d+(?:\\.\\d+)?)%").findAll(sub + " " + after)
+                .map { m -> GearPerk(m.groupValues[1].trim(), m.groupValues[2].toFloat()) }
+                .take(8).toList()
+
+            val id = el.attr("data-id").ifEmpty { "g$i" }
+
+            GearItem(id = id, name = name.ifEmpty { "Gear ${i+1}" }, slot = slotStr,
+                     rarity = rarity, perks = perks, infusionLevel = inf,
+                     isEquipped = equipped, setName = setName)
+        }.filter { it.name.isNotEmpty() }
+    }
+
+    // ── Missions ──────────────────────────────────────────────────────────────
+
+    suspend fun fetchMissions(): List<Bounty> {
+        val doc = Jsoup.parse(get(PAGE_MISSIONS))
+        return doc.select("li, .card").mapIndexed { i, el ->
+            val title  = el.select(".item-title, .card-header").text().trim()
+            val reward = el.select(".item-after, [class*=reward]").text().trim()
+            val done   = el.hasClass("color-green") || el.select("[class*=complete]").isNotEmpty()
+            Bounty(
+                id = el.attr("data-id").ifEmpty { "m$i" },
+                description = title.ifEmpty { return@mapIndexed null },
+                reward = reward.ifEmpty { "VM reward" },
+                timeLimit = "Ongoing",
+                isCompleted = done, isAccepted = true, progress = 0, goal = 1
             )
-        }
+        }.filterNotNull()
     }
 
     // ── HTTP helpers ──────────────────────────────────────────────────────────
@@ -430,7 +616,11 @@ class TitanConquestClient {
     }
 
     suspend fun post(url: String, body: FormBody): String = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(url).post(body).build()
+        val req = Request.Builder()
+            .url(url)
+            .post(body)
+            .header("Referer", url)
+            .build()
         http.newCall(req).execute().use { res ->
             if (!res.isSuccessful) throw NetworkException("HTTP ${res.code} for $url")
             res.body?.string() ?: throw NetworkException("Empty response from $url")
@@ -459,8 +649,6 @@ class InMemoryCookieJar : CookieJar {
 
     fun clear() = store.clear()
 }
-
-// ── Exceptions ────────────────────────────────────────────────────────────────
 
 class LoginException(message: String) : IOException(message)
 class NetworkException(message: String) : IOException(message)

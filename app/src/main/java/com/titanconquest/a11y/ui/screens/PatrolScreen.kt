@@ -24,10 +24,12 @@ fun PatrolScreen(
     lastBattleResult: BattleResult?,
     isLoading: Boolean,
     errorMessage: String?,
-    onStrike: (Enemy) -> Unit,
+    preferredAttack: AttackType,
+    onAttack: (Enemy) -> Unit,
     onRun: (Enemy) -> Unit,
     onUseSuper: (Enemy) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onSetAttackType: (AttackType) -> Unit
 ) {
     val context = LocalContext.current
 
@@ -36,75 +38,131 @@ fun PatrolScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
+
+        // ── Hero status card ───────────────────────────────────────────────────
         heroStats?.let { HeroStatusCard(it) }
 
+        // ── Battle result banner ───────────────────────────────────────────────
         lastBattleResult?.let { BattleResultBanner(it) }
 
+        // ── Error message ──────────────────────────────────────────────────────
         errorMessage?.let {
             Text(
                 text = it,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
                     .semantics { contentDescription = "Error: $it" }
             )
         }
 
+        // ── Attack type selector ───────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AttackType.values().forEach { type ->
+                FilterChip(
+                    selected = preferredAttack == type,
+                    onClick = { onSetAttackType(type) },
+                    label = { Text(type.label, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics {
+                            contentDescription = if (preferredAttack == type)
+                                "${type.label} attack selected. ${type.description}"
+                            else
+                                "Switch to ${type.label} attack. ${type.description}"
+                        }
+                )
+            }
+        }
+
+        // ── Enemy list header ──────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Enemies${heroStats?.location?.let { " — $it" } ?: ""}",
+                text = "${enemies.size} ${if (enemies.size == 1) "enemy" else "enemies"}" +
+                    heroStats?.location?.let { " at $it" }.orEmpty(),
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.semantics {
-                    contentDescription = "Enemy list at ${heroStats?.location ?: "current location"}. ${enemies.size} enemies present."
+                    contentDescription = "${enemies.size} enemies at ${heroStats?.location ?: "current location"}."
                 }
             )
             IconButton(
                 onClick = onRefresh,
-                modifier = Modifier.semantics { contentDescription = "Refresh enemies" }
+                modifier = Modifier.semantics { contentDescription = "Refresh enemy list" }
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = null)
             }
         }
 
-        if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // ── Content ────────────────────────────────────────────────────────────
+        when {
+            isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
-                    modifier = Modifier.semantics { contentDescription = "Loading, please wait" }
+                    modifier = Modifier.semantics { contentDescription = "Loading enemies, please wait" }
                 )
             }
-        } else if (enemies.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().padding(32.dp),
+
+            enemies.isEmpty() -> Box(
+                modifier = Modifier.fillMaxSize().padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "No enemies here right now. Tap Refresh to check again, or travel to another location.",
+                    "No enemies here right now. Tap Refresh or travel to another location.",
                     modifier = Modifier.semantics {
-                        contentDescription = "No enemies at this location. Use the Refresh button or travel to a new area."
+                        contentDescription = "No enemies at this location. Use Refresh or go to Locations tab."
                     }
                 )
             }
-        } else {
-            LazyColumn(
+
+            else -> LazyColumn(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(enemies, key = { it.id }) { enemy ->
-                    EnemyCard(
-                        enemy = enemy,
-                        onStrike = { onStrike(enemy) },
-                        onRun = { onRun(enemy) },
-                        onUseSuper = { onUseSuper(enemy) }
-                    )
+                // Avenging enemies first — accessibility priority
+                val avengers = enemies.filter { it.isAvenging }
+                val normal   = enemies.filter { !it.isAvenging }
+
+                if (avengers.isNotEmpty()) {
+                    item {
+                        Text(
+                            "⚡ Avenging — Double Rewards",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Avenging enemies below give double XP and Drachma rewards."
+                            }
+                        )
+                    }
+                    items(avengers, key = { it.id }) { enemy ->
+                        EnemyCard(enemy, preferredAttack, onAttack, onRun, onUseSuper)
+                    }
+                }
+                if (normal.isNotEmpty()) {
+                    if (avengers.isNotEmpty()) item {
+                        Text("Enemies", style = MaterialTheme.typography.labelLarge,
+                             modifier = Modifier.padding(top = 4.dp))
+                    }
+                    items(normal, key = { it.id }) { enemy ->
+                        EnemyCard(enemy, preferredAttack, onAttack, onRun, onUseSuper)
+                    }
                 }
             }
         }
     }
 }
+
+// ── Hero Status Card ──────────────────────────────────────────────────────────
 
 @Composable
 fun HeroStatusCard(hero: HeroStats) {
@@ -119,44 +177,60 @@ fun HeroStatusCard(hero: HeroStats) {
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(hero.name, style = MaterialTheme.typography.titleLarge)
+                Column {
+                    Text(hero.name, style = MaterialTheme.typography.titleLarge)
+                    Text(hero.heroClass.label,
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Text("Lv ${hero.level}", style = MaterialTheme.typography.titleMedium)
             }
             Spacer(Modifier.height(8.dp))
-            LabeledProgressBar(
-                label = "HP: ${hero.hp} / ${hero.maxHp}",
-                progress = hero.hpPercent,
-                color = when {
-                    hero.hpPercent < 0.25f -> MaterialTheme.colorScheme.error
-                    hero.hpPercent < 0.5f  -> Color(0xFFF57C00)
-                    else                   -> Color(0xFF388E3C)
+
+            // HP bar — colour changes by percentage
+            val hpColor = when {
+                hero.hpPercent < 0.25f -> MaterialTheme.colorScheme.error
+                hero.hpPercent < 0.5f  -> Color(0xFFF57C00)
+                else                   -> Color(0xFF388E3C)
+            }
+            Column(modifier = Modifier.semantics(mergeDescendants = true) {
+                contentDescription = "HP: ${hero.hp} of ${hero.maxHp}, ${(hero.hpPercent * 100).toInt()} percent"
+            }) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("HP", style = MaterialTheme.typography.labelSmall)
+                    Text("${hero.hp} / ${hero.maxHp}", style = MaterialTheme.typography.labelSmall)
                 }
-            )
+                LinearProgressIndicator(
+                    progress = { hero.hpPercent },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = hpColor
+                )
+            }
+
             Spacer(Modifier.height(4.dp))
-            LabeledProgressBar(
-                label = "XP: ${hero.xp} / ${hero.xpToNextLevel}",
-                progress = hero.xpPercent,
-                color = MaterialTheme.colorScheme.tertiary
-            )
+
+            // XP bar
+            Column(modifier = Modifier.semantics(mergeDescendants = true) {
+                contentDescription = "XP: ${hero.xp} of ${hero.xpToNextLevel} to next level, ${(hero.xpPercent * 100).toInt()} percent"
+            }) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("XP", style = MaterialTheme.typography.labelSmall)
+                    Text("${hero.xp} / ${hero.xpToNextLevel}", style = MaterialTheme.typography.labelSmall)
+                }
+                LinearProgressIndicator(
+                    progress = { hero.xpPercent },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 StatChip("Power",   hero.power.toString())
-                StatChip("Gold",    hero.drachma.toString())
+                StatChip("Drachma", hero.drachma.toString())
                 StatChip("LP",      hero.locationPoints.toString())
             }
         }
-    }
-}
-
-@Composable
-fun LabeledProgressBar(label: String, progress: Float, color: Color) {
-    Column(modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = label }) {
-        Text(label, style = MaterialTheme.typography.labelSmall)
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth(),
-            color = color
-        )
     }
 }
 
@@ -172,8 +246,16 @@ fun StatChip(label: String, value: String) {
     }
 }
 
+// ── Enemy Card ────────────────────────────────────────────────────────────────
+
 @Composable
-fun EnemyCard(enemy: Enemy, onStrike: () -> Unit, onRun: () -> Unit, onUseSuper: () -> Unit) {
+fun EnemyCard(
+    enemy: Enemy,
+    preferredAttack: AttackType,
+    onAttack: (Enemy) -> Unit,
+    onRun: (Enemy) -> Unit,
+    onUseSuper: (Enemy) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -182,6 +264,7 @@ fun EnemyCard(enemy: Enemy, onStrike: () -> Unit, onRun: () -> Unit, onUseSuper:
         )
     ) {
         Column(Modifier.padding(16.dp)) {
+            // Name + avenging badge
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -189,58 +272,96 @@ fun EnemyCard(enemy: Enemy, onStrike: () -> Unit, onRun: () -> Unit, onUseSuper:
             ) {
                 Text(enemy.displayName, style = MaterialTheme.typography.titleMedium)
                 if (enemy.isAvenging) {
-                    Text("AVENGE ×2", style = MaterialTheme.typography.labelSmall,
+                    Text("×2 REWARDS",
+                         style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.error)
                 }
             }
-            LinearProgressIndicator(
-                progress = { enemy.hpPercent },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).semantics {
-                    contentDescription = "Enemy HP: ${enemy.hp} of ${enemy.maxHp}"
-                },
-                color = Color(0xFFEF5350)
-            )
-            Text("HP: ${enemy.hp} / ${enemy.maxHp}", style = MaterialTheme.typography.bodySmall,
-                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // Enemy HP bar
+            Spacer(Modifier.height(4.dp))
+            Column(modifier = Modifier.semantics(mergeDescendants = true) {
+                contentDescription = "Enemy HP: ${enemy.hp} of ${enemy.maxHp}"
+            }) {
+                LinearProgressIndicator(
+                    progress = { enemy.hpPercent },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFFEF5350)
+                )
+                Text("${enemy.hp} / ${enemy.maxHp} HP",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
             Spacer(Modifier.height(12.dp))
+
+            // Attack button — label reflects current attack type
+            Button(
+                onClick = { onAttack(enemy) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .semantics {
+                        contentDescription = "${preferredAttack.label} attack on ${enemy.displayName}. " +
+                            "HP: ${enemy.hp} of ${enemy.maxHp}." +
+                            if (enemy.isAvenging) " Double rewards." else ""
+                    }
+            ) {
+                Text("${preferredAttack.label} Attack")
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Super + Run row
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onStrike,
-                    modifier = Modifier.weight(1f).height(56.dp).semantics {
-                        contentDescription = A11yLabels.enemyAttackLabel(
-                            enemy.name, enemy.tier, enemy.hp, enemy.maxHp, enemy.isAvenging)
-                    }
-                ) { Text("Strike") }
                 OutlinedButton(
-                    onClick = onUseSuper,
-                    modifier = Modifier.weight(1f).height(56.dp).semantics {
-                        contentDescription = "Use super ability on ${enemy.displayName}"
-                    }
+                    onClick = { onUseSuper(enemy) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .semantics {
+                            contentDescription = "Use Super ability on ${enemy.displayName}. " +
+                                "Deals 10× primary damage."
+                        }
                 ) { Text("Super") }
+
                 OutlinedButton(
-                    onClick = onRun,
-                    modifier = Modifier.weight(1f).height(56.dp).semantics {
-                        contentDescription = "Run from ${enemy.displayName}. HP will restore."
-                    }
+                    onClick = { onRun(enemy) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .semantics {
+                            contentDescription = "Run from ${enemy.displayName}. Your HP will be fully restored."
+                        }
                 ) { Text("Run") }
             }
         }
     }
 }
 
+// ── Battle Result Banner ──────────────────────────────────────────────────────
+
 @Composable
 fun BattleResultBanner(result: BattleResult) {
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        color = if (result.enemyDefeated) Color(0xFF388E3C)
-                else MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        color = when {
+            result.enemyDefeated -> Color(0xFF388E3C)
+            result.playerRan     -> MaterialTheme.colorScheme.surfaceVariant
+            else                 -> MaterialTheme.colorScheme.secondaryContainer
+        },
         shape = MaterialTheme.shapes.medium
     ) {
         Text(
             text = result.toAnnouncement(),
-            modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            modifier = Modifier
+                .padding(12.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite },
             style = MaterialTheme.typography.bodyMedium,
-            color = if (result.enemyDefeated) Color.White else MaterialTheme.colorScheme.onSurface
+            color = if (result.enemyDefeated) Color.White
+                    else MaterialTheme.colorScheme.onSurface
         )
     }
 }

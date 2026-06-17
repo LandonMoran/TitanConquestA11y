@@ -18,8 +18,10 @@ data class GameUiState(
     val hero: HeroStats? = null,
     val enemies: List<Enemy> = emptyList(),
     val lastBattleResult: BattleResult? = null,
+    val preferredAttack: AttackType = AttackType.PRIMARY,
     val locations: List<Location> = emptyList(),
     val bounties: List<Bounty> = emptyList(),
+    val missions: List<Bounty> = emptyList(),
     val globalChat: List<ChatMessage> = emptyList(),
     val clanChat: List<ChatMessage> = emptyList(),
     val gear: List<GearItem> = emptyList(),
@@ -29,7 +31,7 @@ data class GameUiState(
 
 class GameViewModel : ViewModel() {
 
-    private val client = TitanConquestClient()
+    val client = TitanConquestClient()
 
     private val _state = MutableStateFlow(GameUiState())
     val state: StateFlow<GameUiState> = _state.asStateFlow()
@@ -42,14 +44,13 @@ class GameViewModel : ViewModel() {
             try {
                 client.login(username, password)
                 _state.value = _state.value.copy(isLoggedIn = true, isLoading = false)
-                // Load initial data after login
                 refreshPatrol()
             } catch (e: LoginException) {
                 _state.value = _state.value.copy(isLoading = false, loginError = e.message)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    loginError = "Network error: ${e.message}"
+                    loginError = "Connection error: ${e.message}"
                 )
             }
         }
@@ -58,6 +59,12 @@ class GameViewModel : ViewModel() {
     fun logout() {
         client.logout()
         _state.value = GameUiState()
+    }
+
+    // ── Attack type preference ────────────────────────────────────────────────
+
+    fun setAttackType(type: AttackType) {
+        _state.value = _state.value.copy(preferredAttack = type)
     }
 
     // ── Patrol ────────────────────────────────────────────────────────────────
@@ -76,41 +83,22 @@ class GameViewModel : ViewModel() {
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    patrolError = "Could not load enemies: ${e.message}"
+                    patrolError = "Could not load patrol: ${e.message}"
                 )
             }
         }
     }
 
-    fun strike(enemy: Enemy) {
+    fun attack(enemy: Enemy) {
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
             try {
-                val result = client.strike(enemy.id)
-                val newEnemies = if (result.enemyDefeated) {
-                    _state.value.enemies.filter { it.id != enemy.id }
-                } else {
-                    _state.value.enemies.map {
-                        if (it.id == enemy.id) it.copy(hp = result.enemyHpAfter) else it
-                    }
+                val result = when (_state.value.preferredAttack) {
+                    AttackType.PRIMARY -> client.primaryAttack(enemy.id)
+                    AttackType.SPECIAL -> client.specialAttack(enemy.id)
+                    AttackType.HEAVY   -> client.heavyAttack(enemy.id)
                 }
-                val updatedHero = _state.value.hero?.copy(
-                    hp = result.heroHpAfter,
-                    maxHp = result.heroMaxHp,
-                    xp = _state.value.hero!!.xp + result.xpGained,
-                    drachma = _state.value.hero!!.drachma + result.drachmaGained
-                )
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    lastBattleResult = result,
-                    enemies = newEnemies,
-                    hero = updatedHero
-                )
-                // Auto-refresh if all enemies defeated
-                if (newEnemies.isEmpty()) {
-                    delay(1500)
-                    refreshPatrol()
-                }
+                applyBattleResult(result, enemy)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
@@ -125,7 +113,7 @@ class GameViewModel : ViewModel() {
             _state.value = _state.value.copy(isLoading = true)
             try {
                 val result = client.useSuper(enemy.id)
-                handleBattleResult(result, enemy)
+                applyBattleResult(result, enemy)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
@@ -135,7 +123,7 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    fun runFromBattle(enemy: Enemy) {
+    fun run(enemy: Enemy) {
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
             try {
@@ -155,7 +143,7 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    private fun handleBattleResult(result: BattleResult, enemy: Enemy) {
+    private suspend fun applyBattleResult(result: BattleResult, enemy: Enemy) {
         val newEnemies = if (result.enemyDefeated) {
             _state.value.enemies.filter { it.id != enemy.id }
         } else {
@@ -164,7 +152,7 @@ class GameViewModel : ViewModel() {
             }
         }
         val updatedHero = _state.value.hero?.copy(
-            hp = result.heroHpAfter,
+            hp = result.heroHpAfter.takeIf { it > 0 } ?: _state.value.hero!!.hp,
             xp = _state.value.hero!!.xp + result.xpGained,
             drachma = _state.value.hero!!.drachma + result.drachmaGained
         )
@@ -174,6 +162,10 @@ class GameViewModel : ViewModel() {
             enemies = newEnemies,
             hero = updatedHero
         )
+        if (newEnemies.isEmpty() && result.enemyDefeated) {
+            delay(1500)
+            refreshPatrol()
+        }
     }
 
     // ── Locations ─────────────────────────────────────────────────────────────
@@ -198,12 +190,11 @@ class GameViewModel : ViewModel() {
             _state.value = _state.value.copy(isLoading = true)
             try {
                 client.travel(location.id)
-                val updatedHero = _state.value.hero?.copy(location = location.name)
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    hero = updatedHero,
-                    statusMessage = "Traveled to ${location.name}",
-                    enemies = emptyList()
+                    hero = _state.value.hero?.copy(location = location.name),
+                    enemies = emptyList(),
+                    statusMessage = "Traveled to ${location.name}"
                 )
                 delay(500)
                 refreshPatrol()
@@ -248,7 +239,7 @@ class GameViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 client.claimBounty(bounty.id)
-                _state.value = _state.value.copy(statusMessage = "Bounty claimed!")
+                _state.value = _state.value.copy(statusMessage = "Reward claimed!")
                 loadBounties()
             } catch (e: Exception) {
                 _state.value = _state.value.copy(statusMessage = "Failed: ${e.message}")
@@ -263,7 +254,7 @@ class GameViewModel : ViewModel() {
             try {
                 val msgs = client.fetchChat(clan)
                 if (clan) _state.value = _state.value.copy(clanChat = msgs)
-                else _state.value = _state.value.copy(globalChat = msgs)
+                else      _state.value = _state.value.copy(globalChat = msgs)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(statusMessage = "Chat error: ${e.message}")
             }

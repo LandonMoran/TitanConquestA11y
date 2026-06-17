@@ -231,3 +231,12 @@ data class GearPerk(val name: String, val value: Float) {
 // ── Session ───────────────────────────────────────────────────────────────────
 
 data class Session(val username: String, val cookies: Map<String, String>)
+
+// ── Attack types (from wiki) ──────────────────────────────────────────────────
+// Primary: fastest, spammable. Special: 2x vs shields. Heavy: 1.5x, slowest.
+
+enum class AttackType(val label: String, val description: String) {
+    PRIMARY("Primary", "Fastest attack — spammable, effective against all enemies"),
+    SPECIAL("Special", "Deals double damage to shields — use when enemy has a shield"),
+    HEAVY("Heavy",   "Hardest hit with 50% bonus — best for Titans and tough enemies")
+}
