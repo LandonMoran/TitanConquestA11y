@@ -77,28 +77,35 @@ class TitanConquestClient {
         val loginPageHtml = get(PAGE_LOGIN)
         val loginPageDoc = Jsoup.parse(loginPageHtml)
 
+        // Find the login form on the page
+        val loginPageForm = loginPageDoc.select("form").firstOrNull { form ->
+            form.select("input[type=password]").isNotEmpty()
+        }
+
         // Extract hidden fields (CSRF tokens, etc.) to include in POST
         val formBuilder = FormBody.Builder()
-        loginPageDoc.select("form input[type=hidden]").forEach { hidden ->
+        loginPageForm?.select("input[type=hidden]")?.forEach { hidden ->
             val n = hidden.attr("name")
             val v = hidden.attr("value")
             if (n.isNotEmpty()) formBuilder.add(n, v)
         }
 
         // Detect actual field names from the form (some games use "user", "email", etc.)
-        val userFieldName = loginPageDoc
-            .select("input[type=text], input[type=email], input:not([type])")
-            .firstOrNull { it.attr("name").isNotEmpty() }
+        val userFieldName = loginPageForm
+            ?.select("input[type=text], input[type=email]")
+            ?.firstOrNull { it.attr("name").isNotEmpty() }
             ?.attr("name") ?: "username"
-        val passFieldName = loginPageDoc
-            .select("input[type=password]")
-            .firstOrNull { it.attr("name").isNotEmpty() }
+        val passFieldName = loginPageForm
+            ?.select("input[type=password]")
+            ?.firstOrNull { it.attr("name").isNotEmpty() }
             ?.attr("name") ?: "password"
 
-        formBuilder
-            .add(userFieldName, username)
-            .add(passFieldName, password)
-            .add("remember", "1")
+        formBuilder.add(userFieldName, username)
+        formBuilder.add(passFieldName, password)
+        // Only send remember=1 if the form has that checkbox
+        if (loginPageForm?.select("input[name=remember]")?.isNotEmpty() == true) {
+            formBuilder.add("remember", "1")
+        }
 
         val html = post(PAGE_LOGIN, formBuilder.build())
 
@@ -106,7 +113,7 @@ class TitanConquestClient {
         if (html.trimStart().startsWith("{") || html.trimStart().startsWith("[")) {
             val lower = html.lowercase()
             if (lower.contains("\"success\":true") || lower.contains("\"status\":\"ok\"") ||
-                lower.contains("\"logged\":true") || lower.contains("\"loggedin\":true")) {
+                lower.contains("\"logged\":true") || lower.contains("\"loggedin\\\":true")) {
                 return Session(username, cookieJar.getCookies(BASE))
             }
             val errMsg = Regex("\"(?:error|message|msg)\"\\s*:\\s*\"([^\"]+)\"")
@@ -116,27 +123,24 @@ class TitanConquestClient {
 
         val doc = Jsoup.parse(html)
 
-        // Success: redirected away from login page (no password field in form context)
-        val loginForm = doc.select("form").firstOrNull { form ->
+        // Success: redirected away from login page (no password field in any form)
+        val stillOnLoginForm = doc.select("form").firstOrNull { form ->
             form.select("input[type=password]").isNotEmpty()
         }
-        val stillOnLogin = loginForm != null
 
-        if (!stillOnLogin) {
-            // We landed on a non-login page — success
+        if (stillOnLoginForm == null) {
             return Session(username, cookieJar.getCookies(BASE))
         }
 
-        // Still on login page — extract the error message
-        val errorEl = doc.select(
-            ".block.inset, .toast-text, p.error, .text-color-red, " +
-            ".color-red, [class*=error], [class*=alert]"
+        // Still on login page — look for a specific error element only, never grab general page text
+        val errorEl = stillOnLoginForm.select(
+            ".toast-text, p.error, .text-color-red, .color-red, [class*=error], [class*=alert]"
         ).firstOrNull { it.text().isNotBlank() }
+            ?: doc.select(".toast-text, p.error, .text-color-red, .color-red, [class*=error]")
+                .firstOrNull { it.text().isNotBlank() }
 
         throw LoginException(
-            errorEl?.text()?.trim()
-                ?: doc.select(".block, .card-content").text().trim()
-                    .ifBlank { "Invalid username or password." }
+            errorEl?.text()?.trim() ?: "Invalid username or password."
         )
     }
 
