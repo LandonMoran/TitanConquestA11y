@@ -48,12 +48,20 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
 
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk TitanConquestA11y-debug.apk
+
+      - name: Publish debug APK to latest-debug release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest-debug --yes 2>/dev/null || true
+          gh release create latest-debug \
+            --title "Latest Debug Build" \
+            --notes "Auto-updated debug APK from the latest commit on main. Install via ADB or sideload directly." \
+            --prerelease \
+            TitanConquestA11y-debug.apk
 
   # ── Lint ─────────────────────────────────────────────────────────────────────
   lint:
@@ -146,11 +154,10 @@ jobs:
           - **WCAG AA/AAA colours** — high-contrast Material 3 theme works for low-vision users without TalkBack
 
           ### Installation
-          This is an unsigned debug APK — install via ADB:
+          Download the APK below and sideload it, or install via ADB:
           ```
-          adb install app-release-unsigned.apk
+          adb install TitanConquestA11y-release.apk
           ```
-          Or enable "Install unknown apps" in Android settings and open the file on your device.
 
           ### Notes
           - Requires Android 8.0 (API 26) or higher
@@ -158,4 +165,4 @@ jobs:
           EOF
           )" \
             --prerelease \
-            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk#TitanConquestA11y-release.apk
