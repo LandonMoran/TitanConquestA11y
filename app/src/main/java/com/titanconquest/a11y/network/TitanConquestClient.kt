@@ -273,8 +273,10 @@ class TitanConquestClient {
         }
         val cleanName = rawName.replace(Regex("\\s+I{2,4}$"), "").trim()
 
-        // HP from .item-after, .badge, or data attribute
-        val hpRaw = el.select(".item-after, .badge, [data-hp]").text().trim()
+        // HP from .item-after, .badge, or data attribute — take only the first match
+        // to avoid double-counting when .badge is nested inside .item-after
+        val hpRaw = (el.select(".item-after").first()
+            ?: el.select(".badge, [data-hp]").first())?.text()?.trim() ?: ""
         val hpParts = hpRaw.replace(",","").split("/").map { it.trim().filter { c -> c.isDigit() } }
         val hp    = hpParts.getOrNull(0)?.toIntOrNull() ?: 100
         val maxHp = hpParts.getOrNull(1)?.toIntOrNull() ?: hp.coerceAtLeast(1)
