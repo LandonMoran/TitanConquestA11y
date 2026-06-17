@@ -4,6 +4,7 @@ import com.titanconquest.a11y.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -643,7 +644,7 @@ class InMemoryCookieJar : CookieJar {
     override fun loadForRequest(url: HttpUrl): List<Cookie> = store[url.host] ?: emptyList()
 
     fun getCookies(baseUrl: String): Map<String, String> {
-        val host = HttpUrl.parse(baseUrl)?.host ?: return emptyMap()
+        val host = baseUrl.toHttpUrlOrNull()?.host ?: return emptyMap()
         return store[host]?.associate { it.name to it.value } ?: emptyMap()
     }
 
