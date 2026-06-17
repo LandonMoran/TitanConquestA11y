@@ -35,41 +35,40 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-sealed class Screen(
-    val route: String,
-    val label: String,
-    val icon: ImageVector,
-    val a11yDescription: String
-) {
-    object Login    : Screen("login",     "Login",     Icons.Default.Lock,     "Login screen")
-    object Patrol   : Screen("patrol",    "Patrol",    Icons.Default.Star,     "Patrol — battle enemies")
-    object Hero     : Screen("hero",      "Hero",      Icons.Default.Person,   "My Hero — stats and gear")
-    object Locations: Screen("locations", "Locations", Icons.Default.Place,    "Locations — travel")
-    object Chat     : Screen("chat",      "Chat",      Icons.Default.Email,    "Chat — messages")
-    object Bounties : Screen("bounties",  "Bounties",  Icons.Default.List,     "Bounties — daily missions")
+sealed class Screen(val route: String, val label: String, val icon: ImageVector, val a11y: String) {
+    object Patrol    : Screen("patrol",    "Patrol",    Icons.Default.Star,   "Patrol — battle enemies")
+    object Hero      : Screen("hero",      "Hero",      Icons.Default.Person, "My Hero — stats and gear")
+    object Locations : Screen("locations", "Locations", Icons.Default.Place,  "Locations — travel to new areas")
+    object Chat      : Screen("chat",      "Chat",      Icons.Default.Email,  "Chat — global and clan messages")
+    object Bounties  : Screen("bounties",  "Bounties",  Icons.Default.List,   "Bounties — daily missions")
 }
 
-val gameScreens = listOf(
-    Screen.Patrol, Screen.Hero, Screen.Locations, Screen.Chat, Screen.Bounties
-)
+val GAME_SCREENS = listOf(Screen.Patrol, Screen.Hero, Screen.Locations, Screen.Chat, Screen.Bounties)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TitanConquestApp() {
+    val vm: GameViewModel = viewModel()
+    val state by vm.state.collectAsState()
     val navController = rememberNavController()
-    var isLoggedIn by remember { mutableStateOf(false) }
 
-    if (!isLoggedIn) {
-        // Show login screen full-screen, no nav bar
+    // Show login screen if not authenticated
+    if (!state.isLoggedIn) {
         LoginScreen(
-            isLoading = false,
-            errorMessage = null,
-            onLogin = { _, _ ->
-                isLoggedIn = true
-                // TODO: pass to ViewModel for real auth
-            }
+            isLoading = state.isLoading,
+            errorMessage = state.loginError,
+            onLogin = { username, password -> vm.login(username, password) }
         )
         return
+    }
+
+    // Status snackbar
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(state.statusMessage) {
+        state.statusMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            vm.clearStatus()
+        }
     }
 
     Scaffold(
@@ -77,48 +76,47 @@ fun TitanConquestApp() {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Titan Conquest",
+                        "Titan Conquest",
                         modifier = Modifier.semantics {
-                            contentDescription = "Titan Conquest Accessible Client"
+                            contentDescription = "Titan Conquest — Accessible Client. " +
+                                (state.hero?.let { "Playing as ${it.name}, Level ${it.level}." } ?: "")
                         }
                     )
+                },
+                actions = {
+                    TextButton(
+                        onClick = { vm.logout() },
+                        modifier = Modifier.semantics { contentDescription = "Log out" }
+                    ) { Text("Logout") }
                 }
             )
         },
         bottomBar = {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
-            val currentDestination = navBackStackEntry?.destination
-
+            val current = navBackStackEntry?.destination
             NavigationBar {
-                gameScreens.forEach { screen ->
-                    val selected = currentDestination?.hierarchy
-                        ?.any { it.route == screen.route } == true
-
+                GAME_SCREENS.forEach { screen ->
+                    val selected = current?.hierarchy?.any { it.route == screen.route } == true
                     NavigationBarItem(
-                        icon = {
-                            Icon(screen.icon, contentDescription = null)
-                        },
+                        icon = { Icon(screen.icon, contentDescription = null) },
                         label = { Text(screen.label) },
                         selected = selected,
                         onClick = {
                             navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
                             }
                         },
                         modifier = Modifier.semantics {
-                            contentDescription = if (selected)
-                                "${screen.a11yDescription}, current tab"
-                            else
-                                screen.a11yDescription
+                            contentDescription = if (selected) "${screen.a11y}, current"
+                                                 else screen.a11y
                         }
                     )
                 }
             }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         NavHost(
             navController = navController,
@@ -127,27 +125,49 @@ fun TitanConquestApp() {
         ) {
             composable(Screen.Patrol.route) {
                 PatrolScreen(
-                    heroStats = null,       // wired up via ViewModel in next step
-                    enemies = emptyList(),
-                    lastBattleResult = null,
-                    isLoading = false,
-                    onStrike = {},
-                    onRun = {},
-                    onUseSuper = {},
-                    onRefresh = {}
+                    heroStats = state.hero,
+                    enemies = state.enemies,
+                    lastBattleResult = state.lastBattleResult,
+                    isLoading = state.isLoading,
+                    errorMessage = state.patrolError,
+                    onStrike = { vm.strike(it) },
+                    onRun = { vm.runFromBattle(it) },
+                    onUseSuper = { vm.useSuper(it) },
+                    onRefresh = { vm.refreshPatrol() }
                 )
             }
             composable(Screen.Hero.route) {
-                HeroScreen()
+                HeroScreen(
+                    hero = state.hero,
+                    gear = state.gear,
+                    onLoadGear = { vm.loadGear() }
+                )
             }
             composable(Screen.Locations.route) {
-                LocationsScreen()
+                LocationsScreen(
+                    locations = state.locations,
+                    currentLocation = state.hero?.location ?: "Unknown",
+                    isLoading = state.isLoading,
+                    onLoadLocations = { vm.loadLocations() },
+                    onTravel = { vm.travel(it) }
+                )
             }
             composable(Screen.Chat.route) {
-                ChatScreen()
+                ChatScreen(
+                    globalMessages = state.globalChat,
+                    clanMessages = state.clanChat,
+                    onLoadChat = { clan -> vm.loadChat(clan) },
+                    onSend = { msg, clan -> vm.sendChat(msg, clan) }
+                )
             }
             composable(Screen.Bounties.route) {
-                BountiesScreen()
+                BountiesScreen(
+                    bounties = state.bounties,
+                    isLoading = state.isLoading,
+                    onLoad = { vm.loadBounties() },
+                    onAccept = { vm.acceptBounty(it) },
+                    onClaim = { vm.claimBounty(it) }
+                )
             }
         }
     }
