@@ -47,11 +47,9 @@ class TitanConquestClient {
                 .header("User-Agent",
                     "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
                     "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/124.0.0.0 Mobile Safari/537.36 " +
-                    "TitanConquestA11y/1.0")
+                    "Chrome/124.0.0.0 Mobile Safari/537.36")
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.9")
-                .header("X-Requested-With", "com.firestream.titanconquest")
                 .build()
             chain.proceed(req)
         }
@@ -75,37 +73,71 @@ class TitanConquestClient {
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     suspend fun login(username: String, password: String): Session {
-        // Step 1: GET login page to grab any CSRF token / session cookie
-        get(PAGE_LOGIN)
+        // Step 1: GET login page — grab CSRF token and establish session cookie
+        val loginPageHtml = get(PAGE_LOGIN)
+        val loginPageDoc = Jsoup.parse(loginPageHtml)
 
-        // Step 2: POST credentials — field names from Framework7 form
-        val body = FormBody.Builder()
-            .add("username", username)
-            .add("password", password)
-            .add("remember", "1")
-            .build()
-
-        val html = post(PAGE_LOGIN, body)
-        val doc = Jsoup.parse(html)
-
-        // If we get redirected to home/patrol, login succeeded.
-        // If we're still on login page with an error block, it failed.
-        val stillOnLogin = doc.select("input[name=password]").isNotEmpty()
-        val errorText = doc.select(
-            ".block.inset, .card .card-content, " +
-            ".item-content .item-title, .toast-text, " +
-            "p.error, .text-color-red"
-        ).text().lowercase()
-
-        if (stillOnLogin || errorText.contains("invalid") ||
-            errorText.contains("incorrect") || errorText.contains("not found")) {
-            throw LoginException(
-                doc.select(".block, .card-content").text()
-                    .takeIf { it.isNotBlank() } ?: "Invalid username or password."
-            )
+        // Extract hidden fields (CSRF tokens, etc.) to include in POST
+        val formBuilder = FormBody.Builder()
+        loginPageDoc.select("form input[type=hidden]").forEach { hidden ->
+            val n = hidden.attr("name")
+            val v = hidden.attr("value")
+            if (n.isNotEmpty()) formBuilder.add(n, v)
         }
 
-        return Session(username, cookieJar.getCookies(BASE))
+        // Detect actual field names from the form (some games use "user", "email", etc.)
+        val userFieldName = loginPageDoc
+            .select("input[type=text], input[type=email], input:not([type])")
+            .firstOrNull { it.attr("name").isNotEmpty() }
+            ?.attr("name") ?: "username"
+        val passFieldName = loginPageDoc
+            .select("input[type=password]")
+            .firstOrNull { it.attr("name").isNotEmpty() }
+            ?.attr("name") ?: "password"
+
+        formBuilder
+            .add(userFieldName, username)
+            .add(passFieldName, password)
+            .add("remember", "1")
+
+        val html = post(PAGE_LOGIN, formBuilder.build())
+
+        // Handle JSON response (Framework7 XHR mode)
+        if (html.trimStart().startsWith("{") || html.trimStart().startsWith("[")) {
+            val lower = html.lowercase()
+            if (lower.contains("\"success\":true") || lower.contains("\"status\":\"ok\"") ||
+                lower.contains("\"logged\":true") || lower.contains("\"loggedin\":true")) {
+                return Session(username, cookieJar.getCookies(BASE))
+            }
+            val errMsg = Regex("\"(?:error|message|msg)\"\\s*:\\s*\"([^\"]+)\"")
+                .find(html)?.groupValues?.get(1) ?: "Invalid username or password."
+            throw LoginException(errMsg)
+        }
+
+        val doc = Jsoup.parse(html)
+
+        // Success: redirected away from login page (no password field in form context)
+        val loginForm = doc.select("form").firstOrNull { form ->
+            form.select("input[type=password]").isNotEmpty()
+        }
+        val stillOnLogin = loginForm != null
+
+        if (!stillOnLogin) {
+            // We landed on a non-login page — success
+            return Session(username, cookieJar.getCookies(BASE))
+        }
+
+        // Still on login page — extract the error message
+        val errorEl = doc.select(
+            ".block.inset, .toast-text, p.error, .text-color-red, " +
+            ".color-red, [class*=error], [class*=alert]"
+        ).firstOrNull { it.text().isNotBlank() }
+
+        throw LoginException(
+            errorEl?.text()?.trim()
+                ?: doc.select(".block, .card-content").text().trim()
+                    .ifBlank { "Invalid username or password." }
+        )
     }
 
     fun logout() = cookieJar.clear()
