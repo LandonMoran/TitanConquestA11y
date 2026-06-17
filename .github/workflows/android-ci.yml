@@ -8,7 +8,7 @@ on:
 
 jobs:
 
-  # ── Unit Tests + Debug Build ──────────────────────────────────────────────────
+  # ── Build & Test ──────────────────────────────────────────────────────────────
   build:
     name: Test & Build Debug APK
     runs-on: ubuntu-latest
@@ -22,33 +22,28 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
-          restore-keys: ${{ runner.os }}-gradle-
+          gradle-version: "8.9"
 
-      - name: Grant execute permission for gradlew
+      - name: Make gradlew executable
         run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew test --stacktrace
+        run: ./gradlew test --stacktrace --no-daemon
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ github.sha }}
           path: app/build/reports/tests/
           retention-days: 7
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -57,7 +52,7 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
-  # ── Lint ───────────────────────────────────────────────────────────────────────
+  # ── Lint ─────────────────────────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -71,32 +66,27 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
-          restore-keys: ${{ runner.os }}-gradle-
+          gradle-version: "8.9"
 
-      - name: Grant execute permission for gradlew
+      - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Run Android Lint
-        run: ./gradlew lintDebug --stacktrace
+      - name: Run Lint
+        run: ./gradlew lintDebug --stacktrace --no-daemon
 
       - name: Upload Lint Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lint-report
+          name: lint-report-${{ github.sha }}
           path: app/build/reports/lint-results-debug.html
           retention-days: 7
 
-  # ── Release Build (main branch only) ─────────────────────────────────────────
+  # ── Release Build (main only) ─────────────────────────────────────────────────
   release:
     name: Build Release APK
     runs-on: ubuntu-latest
@@ -112,22 +102,17 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
-          restore-keys: ${{ runner.os }}-gradle-
+          gradle-version: "8.9"
 
-      - name: Grant execute permission for gradlew
+      - name: Make gradlew executable
         run: chmod +x gradlew
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Sign Release APK
         if: ${{ secrets.KEYSTORE_BASE64 != '' }}
