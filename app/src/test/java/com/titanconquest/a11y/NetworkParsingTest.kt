@@ -3,6 +3,7 @@ package com.titanconquest.a11y
 import com.titanconquest.a11y.model.*
 import com.titanconquest.a11y.network.TitanConquestClient
 import org.jsoup.Jsoup
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -19,6 +20,11 @@ import org.junit.Test
 class NetworkParsingTest {
 
     private val client = TitanConquestClient()
+
+    @After fun tearDown() {
+        client.http.dispatcher.executorService.shutdown()
+        client.http.connectionPool.evictAll()
+    }
 
     // ── Hero stat parsing ─────────────────────────────────────────────────────
 
