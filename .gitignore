@@ -17,3 +17,6 @@ local.properties
 # Signing keys — NEVER commit these
 *.jks
 *.keystore
+
+# Locally downloaded prebuilt APKs (CI publishes these to Releases)
+/_prebuilt/

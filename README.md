@@ -1,96 +1,68 @@
-# Titan Conquest — Accessible Android Client
+# Bloodwar 2 — Accessible Android Client
 
-A TalkBack-first Android client for [titanconquest.com](https://titanconquest.com), designed specifically for blind and visually impaired players.
-
-## Why this exists
-
-The official Titan Conquest app is a visual-first web wrapper. This client rebuilds the interface from scratch with:
-
-- **Full TalkBack support** — every element has a meaningful `contentDescription`
-- **Live region announcements** — battle results, loot, XP gains are spoken aloud automatically
-- **Large touch targets** — all buttons are at least 56dp tall
-- **High-contrast theme** — WCAG AA compliant colors in both light and dark mode
-- **Logical focus order** — TalkBack navigation follows the natural game flow
-- **No gesture-only actions** — everything reachable by single tap
+An accessible Android client for [titanconquest.com](https://titanconquest.com), built for blind and visually impaired players. It is an Android port of the **Bloodwar 2** desktop (Electron) client.
 
 ## How it works
 
-This is a native Android app that connects to `titanconquest.com` via HTTPS, just like the browser app. It logs in with your existing account, then parses the game's HTML responses to present them in an accessible UI.
+The Bloodwar 2 desktop client doesn't reimplement the game — it loads the **real** titanconquest.com in a Chromium window and injects a single accessibility/performance script, `enhancer.js`, into the live page. That script is where every feature lives.
 
-**No separate server or account needed** — use your existing Titan Conquest account.
+This Android app does exactly the same thing. A full-screen `WebView` (which *is* Chrome on Android) loads the live site, and after each page load we inject the **same, unchanged `enhancer.js`**. Because it's the identical code running in the same browser engine, every feature comes along automatically:
+
+- **Semantic ARIA roles & labels** → spoken correctly by TalkBack
+- **Enemy-list memory, decoy safety & smart area navigation**
+- **Battle sound effects** (the bundled `audio/` library)
+- **Battle hooks** — skip victory screen, spoken battle/loot/XP announcements
+- **Keyboard shortcuts** for battle actions (requires a hardware/Bluetooth keyboard)
+- **Performance** — lazy image loading, DOM cleanup, request dedup
+- **Bulk infuse, stats-zone labels, focus management**, and more
+
+**No separate server or account needed** — log in once with your existing Titan Conquest account; the session cookie persists across launches.
+
+### The native contract
+
+`enhancer.js` depends on only two things from its host, both provided here:
+
+| Global | Provided by |
+|--------|-------------|
+| `window.__bw2Audio` — map of `name → data:audio/…;base64,…` | `NativeBridge.audioJson()`, built from bundled `assets/audio/` |
+| `window.__bw2Log(level, …)` — optional diagnostic logging | `NativeBridge.log()` → Android `Logcat` (tag `BW2`) |
+
+Everything else `enhancer.js` references (`__bw2Audio`, `__tcEnhancerLoaded`, etc.) it sets on `window` itself. The desktop client's `preload.js` is almost entirely anti-bot fingerprint spoofing to make *Electron* look like Chrome — unnecessary here because Android WebView already is Chrome. We do match the desktop client's **desktop-Chrome user-agent** so titanconquest.com serves the desktop DOM that `enhancer.js` targets.
 
 ## Project structure
 
 ```
-app/src/main/java/com/titanconquest/a11y/
-├── MainActivity.kt          # App entry point and navigation
-├── accessibility/
-│   └── A11yAnnouncer.kt     # TalkBack announcement utilities
-├── model/
-│   └── GameModels.kt        # Game data classes with a11y descriptions
-├── network/
-│   └── TitanConquestClient.kt  # HTTP client — talks to titanconquest.com
-└── ui/
-    ├── screens/
-    │   ├── LoginScreen.kt   # Login with accessible form fields
-    │   ├── PatrolScreen.kt  # Core battle screen — enemies + actions
-    │   └── PlaceholderScreens.kt  # Hero, Locations, Chat, Bounties
-    └── theme/
-        └── Theme.kt         # High-contrast Material 3 theme
+app/src/main/
+├── java/com/titanconquest/a11y/
+│   └── MainActivity.kt        # WebView shell + JS bridge + enhancer injection
+└── assets/
+    ├── enhancer.js            # The Bloodwar 2 enhancer, verbatim
+    └── audio/                 # Battle SFX (ogg/wav), injected as data URIs
 ```
 
 ## Building
 
 ### Requirements
-- Android Studio Hedgehog or later
-- JDK 17
-- Android SDK 35
+- JDK 17, Android SDK 35 (AGP 8.5.2, Kotlin 2.0.0, Gradle 8.9)
 
 ### Run locally
 ```bash
-git clone <your-repo>
-cd TitanConquestA11y
 ./gradlew assembleDebug
-# Install on connected device:
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### GitHub Actions CI
+Every push and pull request builds a debug APK and runs lint. Pushes to `main` publish the APK to the **`latest-debug`** GitHub Release, so it can be downloaded directly onto a phone and sideloaded — no cable needed.
 
-Every push and pull request automatically:
-1. Runs unit tests
-2. Builds a debug APK (available as a GitHub Actions artifact)
-3. Runs Android Lint including accessibility checks
+## Installing on a phone
+1. On the phone, open the `latest-debug` release and download `TitanConquestA11y-debug.apk`.
+2. Tap it; allow installs from this source when prompted; tap **Install**.
+3. Enable TalkBack (**Settings → Accessibility → TalkBack**) and open the app.
 
-Pushes to `main` also build a release APK. To enable APK signing, add these secrets in your repo's **Settings → Secrets and Variables → Actions**:
+## Known limitations / things to verify on-device
+- **Desktop layout assumption** — if titanconquest.com reflows to a mobile layout despite the desktop UA, some enhancer selectors may need adjustment.
+- **Keyboard shortcuts** require a physical/Bluetooth keyboard. A future on-screen control bar could expose those actions to touch.
+- Desktop-only dev tooling from the Electron client (F2/F4/F12 debug keys, the watchdog, HTML dumps) is intentionally not ported.
 
-| Secret | Description |
-|--------|-------------|
-| `KEYSTORE_BASE64` | Base64-encoded `.jks` keystore |
-| `KEY_ALIAS` | Key alias in the keystore |
-| `KEY_PASSWORD` | Key password |
-| `STORE_PASSWORD` | Keystore password |
-
-Generate a base64 keystore: `base64 -i your-keystore.jks | pbcopy`
-
-## Testing with TalkBack
-
-1. Enable TalkBack on your Android device: **Settings → Accessibility → TalkBack**
-2. Install the debug APK
-3. Navigate the app using TalkBack swipe gestures
-4. Check that every screen, button, and game event is announced correctly
-
-## Roadmap
-
-- [ ] Login + session persistence (DataStore)
-- [ ] Patrol screen wired to live game data
-- [ ] Hero stats screen
-- [ ] Locations / travel
-- [ ] Global + clan chat
-- [ ] Bounties screen
-- [ ] Gear / inventory management
-- [ ] Sound effects for battle events (optional, user-configurable)
-
-## Contributing
-
-Pull requests welcome. Please test any UI changes with TalkBack before submitting.
+## Keeping the enhancer in sync
+`assets/enhancer.js` and `assets/audio/` are copied from the Bloodwar 2 desktop project. When the enhancer changes there, copy the updated files over and rebuild — no Kotlin changes needed.
