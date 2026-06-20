@@ -1,7 +1,11 @@
 package com.titanconquest.a11y
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.util.Base64
 import android.util.Log
 import android.view.KeyEvent
@@ -13,8 +17,13 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileWriter
+import java.text.SimpleDateFormat
+import java.util.*
 
 /**
  * Bloodwar 2 — Android client.
@@ -37,6 +46,9 @@ import java.io.ByteArrayOutputStream
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
+    private var logFile: File? = null
+    private var logWriter: FileWriter? = null
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     /** Built once from bundled assets: { "benemy.ogg": "data:audio/ogg;base64,..." }. */
     private val audioJson: String by lazy { buildAudioJson() }
@@ -46,9 +58,18 @@ class MainActivity : ComponentActivity() {
         assets.open("enhancer.js").bufferedReader().use { it.readText() }
     }
 
+    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+        if (uri != null) {
+            initializeLogging(uri)
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Prompt for log file location
+        promptForLogFile()
 
         // Persistent cookies so the TQRPG session survives across launches —
         // the Electron app relies on Electron's persistent session for the same
@@ -357,6 +378,62 @@ class MainActivity : ComponentActivity() {
     private var ltTriggerPressed = false
     private var rtTriggerPressed = false
 
+    private fun promptForLogFile() {
+        AlertDialog.Builder(this)
+            .setTitle("Game Activity Logging")
+            .setMessage("Save game activity log to file? This will capture all network, UI, and game interactions.")
+            .setPositiveButton("Yes, Save Log") { _, _ ->
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                createDocumentLauncher.launch("titanconquest_$timestamp.log")
+            }
+            .setNegativeButton("No Logging") { _, _ ->
+                writeLog("=== Logging disabled ===")
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun initializeLogging(uri: Uri) {
+        try {
+            logFile = File(uri.path ?: return)
+            logWriter = contentResolver.openOutputStream(uri)?.bufferedWriter()?.let { FileWriter(uri.path ?: return) }
+
+            // Try to get actual file path
+            val displayName = "titanconquest_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.log"
+            logFile = File(getExternalFilesDir(null), displayName)
+            logWriter = FileWriter(logFile, true)
+
+            writeLog("=".repeat(80))
+            writeLog("GAME SESSION STARTED: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}")
+            writeLog("=".repeat(80))
+
+            android.widget.Toast.makeText(
+                this,
+                "Logging to: ${logFile?.absolutePath}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            Log.e("Logging", "Failed to initialize log file", e)
+            writeLog("ERROR: Failed to create log file: ${e.message}")
+        }
+    }
+
+    private fun writeLog(message: String) {
+        try {
+            val timestamp = dateFormat.format(Date())
+            val logLine = "[$timestamp] $message\n"
+
+            logWriter?.apply {
+                write(logLine)
+                flush()
+            }
+
+            Log.d("GameLog", message)
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error writing to log", e)
+        }
+    }
+
     private fun getCenteredAxis(event: MotionEvent, axis: Int): Float {
         val range = event.device?.getMotionRange(axis, MotionEvent.TOOL_TYPE_UNKNOWN)
         val flat = range?.flat ?: 0f
@@ -458,6 +535,7 @@ class MainActivity : ComponentActivity() {
             }
 
             Log.println(priority, tag, text)
+            writeLog("[$tag] $text")
         }
     }
 }
