@@ -149,6 +149,9 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace --no-daemon
 
+      - name: Rename Release APK
+        run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -183,4 +186,4 @@ jobs:
           EOF
           )" \
             --prerelease \
-            app/build/outputs/apk/release/app-release-unsigned.apk#TitanConquestA11y-release.apk
+            TitanConquestA11y-release.apk
