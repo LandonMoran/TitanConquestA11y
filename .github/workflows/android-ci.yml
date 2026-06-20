@@ -152,8 +152,20 @@ jobs:
           echo "Running gradle build..."
           ./gradlew assembleRelease --no-daemon 2>&1 | tail -100
 
-      - name: Copy APK
-        run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-${{ github.ref_name }}.apk
+      - name: Find and Copy APK
+        run: |
+          echo "Searching for APK files..."
+          find app/build/outputs -name "*.apk" -type f
+
+          # Try different possible paths
+          for apk in app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app*.apk; do
+            if [ -f "$apk" ]; then
+              echo "Found APK: $apk"
+              cp "$apk" TitanConquestA11y-${{ github.ref_name }}.apk
+              ls -lh TitanConquestA11y-${{ github.ref_name }}.apk
+              break
+            fi
+          done
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
