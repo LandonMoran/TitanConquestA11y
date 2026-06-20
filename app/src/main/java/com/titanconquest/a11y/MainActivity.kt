@@ -256,89 +256,10 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
 
-        val hardvenVictorySkip = """
-            (function () {
-              if (window.__victoryHardenedLoaded) return;
-              window.__victoryHardenedLoaded = true;
-
-              var lastVictoryCheck = 0;
-              var lastVictoryTime = 0;
-
-              function detectAndSkipVictory() {
-                var now = Date.now();
-                if (now - lastVictoryCheck < 100) return;
-                lastVictoryCheck = now;
-
-                try {
-                  var pageText = document.body.textContent || '';
-                  var isVictory = pageText.includes('You killed') && !pageText.includes('You died');
-
-                  if (isVictory && (now - lastVictoryTime) > 500) {
-                    lastVictoryTime = now;
-                    window.__bw2Log && window.__bw2Log('info', 'VICTORY-HARDENED: Victory detected, attempting skip');
-
-                    var patrolLink = null;
-
-                    // Try multiple selectors for the patrol link
-                    var selectors = [
-                      'a.patrollink',
-                      'a[href*="patrol"]',
-                      'a[class*="patrol"]',
-                      '[data-page="patrol"] a',
-                      'a:contains("Patrol")'
-                    ];
-
-                    for (var i = 0; i < selectors.length && !patrolLink; i++) {
-                      try {
-                        if (selectors[i].includes('contains')) {
-                          var links = document.querySelectorAll('a');
-                          for (var j = 0; j < links.length; j++) {
-                            if (links[j].textContent.includes('Patrol')) {
-                              patrolLink = links[j];
-                              break;
-                            }
-                          }
-                        } else {
-                          patrolLink = document.querySelector(selectors[i]);
-                        }
-                        if (patrolLink) {
-                          window.__bw2Log && window.__bw2Log('info', 'VICTORY-HARDENED: Found patrol link with selector: ' + selectors[i]);
-                          break;
-                        }
-                      } catch (e) {}
-                    }
-
-                    if (patrolLink) {
-                      try {
-                        var href = patrolLink.getAttribute('href');
-                        if (href && href !== 'x') {
-                          window.location.href = href;
-                        } else {
-                          patrolLink.click();
-                        }
-                        window.__bw2Log && window.__bw2Log('info', 'VICTORY-HARDENED: Clicked patrol link');
-                      } catch (e) {
-                        window.__bw2Log && window.__bw2Log('warn', 'VICTORY-HARDENED: Failed to click: ' + e.message);
-                      }
-                    } else {
-                      window.__bw2Log && window.__bw2Log('warn', 'VICTORY-HARDENED: Could not find patrol link');
-                    }
-                  }
-                } catch (e) {
-                  window.__bw2Log && window.__bw2Log('error', 'VICTORY-HARDENED: ' + e.message);
-                }
-              }
-
-              setInterval(detectAndSkipVictory, 100);
-            })();
-        """.trimIndent()
-
         view.evaluateJavascript(bootstrap) {
             view.evaluateJavascript(audioOptimizer) { _ ->
                 view.evaluateJavascript(enhancerJs) { _ ->
-                    view.evaluateJavascript(stripChat) { _ ->
-                        view.evaluateJavascript(hardvenVictorySkip, null)
-                    }
+                    view.evaluateJavascript(stripChat, null)
                 }
             }
         }
