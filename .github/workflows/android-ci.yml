@@ -148,7 +148,7 @@ jobs:
 
       - name: Build Release APK
         env:
-          KEYSTORE_FILE: app/titanconquest.jks
+          KEYSTORE_FILE: ${{ github.workspace }}/app/titanconquest.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
