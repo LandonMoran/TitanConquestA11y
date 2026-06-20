@@ -114,16 +114,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Debug Info
-        run: |
-          echo "GitHub context:"
-          echo "  ref: ${{ github.ref }}"
-          echo "  ref_name: ${{ github.ref_name }}"
-          echo "  workspace: ${{ github.workspace }}"
-          echo ""
-          echo "Event trigger: ${{ github.event_name }}"
-          echo "Tag condition check: startsWith('${{ github.ref }}', 'refs/tags/v') = ${{ startsWith(github.ref, 'refs/tags/v') }}"
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -140,16 +130,10 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Decode and setup keystore
+      - name: Decode keystore
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
-        run: |
-          if [ -z "$KEYSTORE_B64" ]; then
-            echo "ERROR: RELEASE_KEYSTORE_B64 secret not set."
-            exit 1
-          fi
-          echo "$KEYSTORE_B64" | base64 -d > app/titanconquest.jks
-          ls -lh app/titanconquest.jks
+        run: echo "$KEYSTORE_B64" | base64 -d > app/titanconquest.jks
 
       - name: Build Release APK
         env:
@@ -157,19 +141,15 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Rename and verify APK
-        run: |
-          cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
-          ls -lh TitanConquestA11y-release.apk
-
-      - name: Create GitHub Release
+      - name: Publish Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
           gh release create "${{ github.ref_name }}" \
             --title "TitanConquest A11y ${{ github.ref_name }}" \
-            --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
+            --notes "Accessible Android client for Titan Conquest" \
             --prerelease \
             TitanConquestA11y-release.apk
