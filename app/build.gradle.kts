@@ -15,10 +15,20 @@ android {
         versionName = "1.1"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "app/titanconquest.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "titanconquest123"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "titanconquest"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "titanconquest123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isDebuggable = true
