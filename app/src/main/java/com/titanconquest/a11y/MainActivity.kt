@@ -55,7 +55,11 @@ class MainActivity : ComponentActivity() {
             logBuffer.append("================================================================================\n")
             logBuffer.append("GAME SESSION STARTED: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}\n")
             logBuffer.append("================================================================================\n")
-            android.widget.Toast.makeText(this, "✓ Logging enabled", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(
+                this,
+                "✓ Logging enabled - file will be saved when you close the app",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
             writeLog("Logging initialized - file will be saved on app close")
         }
     }
