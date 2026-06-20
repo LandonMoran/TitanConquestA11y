@@ -17,7 +17,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "app/titanconquest.jks")
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "${rootDir}/app/titanconquest.jks")
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "titanconquest123"
             keyAlias = System.getenv("KEY_ALIAS") ?: "titanconquest"
             keyPassword = System.getenv("KEY_PASSWORD") ?: "titanconquest123"
