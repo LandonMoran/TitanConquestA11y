@@ -225,14 +225,7 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_BUTTON_A -> {
-                // A is the "confirm/activate" button — it works in tandem with
-                // TalkBack. The user navigates with the D-Pad (TalkBack owns
-                // those keys; we never consume them), DOM focus follows onto the
-                // focused enemy row / action link, and A clicks THAT element —
-                // engaging the exact enemy TalkBack just announced. Falls back
-                // to the "1" attack shortcut when nothing is focused, so combat
-                // still works exactly as before.
-                injectActivateOrAttack()
+                injectKeyEvent("1")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_B -> {
@@ -283,47 +276,6 @@ class MainActivity : ComponentActivity() {
         val flat = range?.flat ?: 0f
         val value = event.getAxisValue(axis)
         return if (Math.abs(value) > flat) value else 0f
-    }
-
-    /**
-     * Click whatever the user is currently focused on, so the controller works
-     * IN TANDEM with TalkBack. With TalkBack running, the user moves
-     * accessibility focus with the D-Pad (which we deliberately never consume);
-     * for interactive elements — enemy rows (`a.initBattle`), battle action
-     * links, menu items — the WebView syncs DOM focus onto that element, so
-     * `document.activeElement` IS the thing TalkBack just announced. Pressing A
-     * dispatches a real DOM click on it, engaging the exact enemy the player
-     * chose rather than the game's auto-picked priority target.
-     *
-     * If nothing meaningful is focused (e.g. a fresh patrol screen before the
-     * user has navigated), we fall back to the game's "1" attack shortcut so
-     * one-press combat keeps working exactly as it did before.
-     */
-    private fun injectActivateOrAttack() {
-        val jsCode = """
-            (function() {
-                var ae = document.activeElement;
-                var target = (ae && ae !== document.body) ? ae.closest(
-                    'a, button, [role="button"], .initBattle, .attacklink, ' +
-                    '.speciallink, .heavylink, .superlink, .coverlink, ' +
-                    '.remedylink, .runlink'
-                ) : null;
-                if (target) {
-                    target.click();
-                    return;
-                }
-                var event = new KeyboardEvent('keydown', {
-                    key: '1',
-                    code: 'Digit1',
-                    keyCode: 49,
-                    which: 49,
-                    bubbles: true,
-                    cancelable: true
-                });
-                document.dispatchEvent(event);
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(jsCode, null)
     }
 
     private fun injectKeyEvent(keyValue: String) {
