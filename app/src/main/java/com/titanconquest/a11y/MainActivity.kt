@@ -136,6 +136,74 @@ class MainActivity : ComponentActivity() {
                 }
               } catch (e) {}
             })();
+
+            // ===== COMPREHENSIVE ACTIVITY LOGGING =====
+            (function() {
+              var activityLog = [];
+
+              // Log all fetch/XHR requests
+              var origFetch = window.fetch;
+              window.fetch = function() {
+                var args = Array.prototype.slice.call(arguments);
+                var url = args[0];
+                window.__bw2Log('info', 'FETCH:', typeof url === 'string' ? url : url.url, 'method:', args[1]?.method || 'GET');
+                return origFetch.apply(this, arguments);
+              };
+
+              var origXHR = XMLHttpRequest.prototype.open;
+              XMLHttpRequest.prototype.open = function(method, url) {
+                window.__bw2Log('info', 'XHR:', method, url);
+                return origXHR.apply(this, arguments);
+              };
+
+              // Log all clicks
+              document.addEventListener('click', function(e) {
+                var target = e.target;
+                var text = target.textContent?.substring(0, 50) || target.className || target.id || 'unknown';
+                window.__bw2Log('info', 'CLICK:', text, 'class:', target.className, 'id:', target.id);
+              }, true);
+
+              // Log all form submissions
+              document.addEventListener('submit', function(e) {
+                window.__bw2Log('info', 'SUBMIT:', e.target.action || 'unknown', 'fields:', Object.keys(new FormData(e.target)).join(','));
+              }, true);
+
+              // Log key events
+              document.addEventListener('keydown', function(e) {
+                window.__bw2Log('debug', 'KEY:', e.key, 'code:', e.code, 'keyCode:', e.keyCode);
+              }, true);
+
+              // Log DOM mutations
+              var observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(m) {
+                  if (m.type === 'childList' && m.addedNodes.length > 0) {
+                    var sample = Array.prototype.slice.call(m.addedNodes, 0, 2).map(n =>
+                      n.nodeType === 1 ? '<' + n.tagName.toLowerCase() + '>' : n.textContent?.substring(0, 30)
+                    ).join(', ');
+                    window.__bw2Log('debug', 'DOM_ADD:', sample, 'at:', m.target.className || m.target.id);
+                  }
+                  if (m.type === 'attributes') {
+                    window.__bw2Log('debug', 'ATTR_CHANGE:', m.attributeName, 'on:', m.target.className || m.target.id);
+                  }
+                });
+              });
+              observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['style', 'class', 'data-page', 'href'],
+                characterData: false
+              });
+
+              // Log storage changes
+              var origSetItem = Storage.prototype.setItem;
+              Storage.prototype.setItem = function(key, val) {
+                window.__bw2Log('info', 'STORAGE_SET:', key, '=', typeof val === 'string' ? val.substring(0, 100) : val);
+                return origSetItem.call(this, key, val);
+              };
+
+              window.__bw2Log('info', '===== GAME SESSION STARTED =====');
+            })();
         """.trimIndent()
 
         view.evaluateJavascript(bootstrap) {
@@ -372,16 +440,24 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun log(level: String, text: String) {
-            Log.println(
-                when (level.lowercase()) {
-                    "error" -> Log.ERROR
-                    "warn" -> Log.WARN
-                    "info" -> Log.INFO
-                    else -> Log.DEBUG
-                },
-                "BW2",
-                text
-            )
+            val tag = when {
+                text.contains("FETCH") || text.contains("XHR") -> "🌐 NET"
+                text.contains("CLICK") -> "👆 CLICK"
+                text.contains("KEY") -> "⌨️  KEY"
+                text.contains("DOM") || text.contains("ATTR") -> "📄 DOM"
+                text.contains("STORAGE") -> "💾 STORE"
+                text.contains("SESSION") -> "▶️  SESSION"
+                else -> "BW2"
+            }
+
+            val priority = when (level.lowercase()) {
+                "error" -> Log.ERROR
+                "warn" -> Log.WARN
+                "info" -> Log.INFO
+                else -> Log.DEBUG
+            }
+
+            Log.println(priority, tag, text)
         }
     }
 }
