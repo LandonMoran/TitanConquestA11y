@@ -193,12 +193,56 @@ class MainActivity : ComponentActivity() {
                           window.__bw2Log('error', 'AUDIO_FAILED ' + audioKey + ' error=' + audio.error);
                         };
 
+                        // Wrap play() to log attempts and errors
+                        var origPlay = audio.play;
+                        audio.play = function() {
+                          window.__bw2Log('info', 'AUDIO_PLAY ' + audioKey);
+                          try {
+                            var result = origPlay.call(this);
+                            if (result && result.then) {
+                              result.catch(function(err) {
+                                window.__bw2Log('error', 'AUDIO_PLAY_ERROR ' + audioKey + ': ' + err.message);
+                              });
+                            }
+                            return result;
+                          } catch (err) {
+                            window.__bw2Log('error', 'AUDIO_PLAY_EXCEPTION ' + audioKey + ': ' + err.message);
+                            throw err;
+                          }
+                        };
+
                         window.__audioCache[audioKey] = audio;
                       })(key);
                     }
                     window.__bw2Log('info', 'AUDIO_PRELOAD started for ' + Object.keys(window.__bw2Audio).length + ' files');
                   } catch (e) { window.__bw2Log('error', 'AUDIO_PRELOAD error: ' + e.message); }
                 };
+
+                // Also wrap the global Audio constructor to log all audio playback
+                try {
+                  var OrigAudio = window.Audio;
+                  window.Audio = function(src) {
+                    var audio = new OrigAudio(src);
+                    var origPlay = audio.play;
+                    audio.play = function() {
+                      window.__bw2Log('info', 'AUDIO_NEW_PLAY from src=' + (src || audio.src || 'unknown'));
+                      try {
+                        var result = origPlay.call(this);
+                        if (result && result.then) {
+                          result.catch(function(err) {
+                            window.__bw2Log('error', 'AUDIO_NEW_PLAY_ERROR: ' + err.message);
+                          });
+                        }
+                        return result;
+                      } catch (err) {
+                        window.__bw2Log('error', 'AUDIO_NEW_PLAY_EXCEPTION: ' + err.message);
+                        throw err;
+                      }
+                    };
+                    return audio;
+                  };
+                  window.Audio.prototype = OrigAudio.prototype;
+                } catch (e) { window.__bw2Log('error', 'Audio wrapper failed: ' + e.message); }
 
                 setTimeout(window.__audioPreload, 50);
               } catch (e) {}
