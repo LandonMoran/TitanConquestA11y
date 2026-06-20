@@ -180,88 +180,8 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
 
-        val audioOptimizer = """
-            (function () {
-              if (window.__audioOptimizerLoaded) return;
-              window.__audioOptimizerLoaded = true;
-
-              var OriginalAudio = window.Audio;
-              var audioPool = {};
-
-              window.Audio = function(src) {
-                try {
-                  if (src && window.__bw2Audio && window.__bw2Audio[src]) {
-                    if (!audioPool[src]) {
-                      audioPool[src] = [];
-                    }
-                    var pooledAudio = audioPool[src].find(function(a) { return !a.__playing; });
-                    if (pooledAudio) {
-                      return pooledAudio;
-                    }
-                  }
-                } catch (e) {}
-
-                var audio = new OriginalAudio(src);
-                audio.__originalPlay = audio.play;
-                audio.play = function() {
-                  var self = this;
-                  this.__playing = true;
-                  var result = this.__originalPlay.apply(this, arguments);
-                  if (result && result.then) {
-                    result.then(function() {
-                      setTimeout(function() { self.__playing = false; }, this.duration * 1000 + 100);
-                    }).catch(function() {
-                      self.__playing = false;
-                    });
-                  } else {
-                    setTimeout(function() { self.__playing = false; }, audio.duration * 1000 + 100);
-                  }
-                  return result;
-                };
-                return audio;
-              };
-
-              window.Audio.prototype = OriginalAudio.prototype;
-            })();
-        """.trimIndent()
-
-        val stripChat = """
-            (function () {
-              if (window.__stripChatLoaded) return;
-              window.__stripChatLoaded = true;
-
-              function removeChat() {
-                var chatSelectors = [
-                  '.panel-right',
-                  '[class*="chat"]',
-                  '[id*="chat"]',
-                  '[class*="conversation"]',
-                  '[class*="messenger"]'
-                ];
-
-                chatSelectors.forEach(function(selector) {
-                  try {
-                    var elements = document.querySelectorAll(selector);
-                    elements.forEach(function(el) {
-                      if (el && el.parentNode) {
-                        el.remove();
-                      }
-                    });
-                  } catch (e) {}
-                });
-              }
-
-              removeChat();
-              setInterval(removeChat, 500);
-            })();
-        """.trimIndent()
-
         view.evaluateJavascript(bootstrap) {
-            view.evaluateJavascript(audioOptimizer) { _ ->
-                view.evaluateJavascript(enhancerJs) { _ ->
-                    view.evaluateJavascript(stripChat, null)
-                }
-            }
+            view.evaluateJavascript(enhancerJs, null)
         }
     }
 

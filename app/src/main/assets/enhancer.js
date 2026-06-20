@@ -3653,6 +3653,83 @@
   }
 
   // =========================================================================
+  //  MODULE 14: PERFORMANCE — Audio Pooling & Optimization
+  // =========================================================================
+  function setupAudioOptimizer() {
+    if (window.__audioOptimizerLoaded) return;
+    window.__audioOptimizerLoaded = true;
+
+    const OriginalAudio = window.Audio;
+    const audioPool = {};
+
+    window.Audio = function(src) {
+      try {
+        if (src && window.__bw2Audio && window.__bw2Audio[src]) {
+          if (!audioPool[src]) {
+            audioPool[src] = [];
+          }
+          const pooledAudio = audioPool[src].find(a => !a.__playing);
+          if (pooledAudio) {
+            return pooledAudio;
+          }
+        }
+      } catch (e) {}
+
+      const audio = new OriginalAudio(src);
+      audio.__originalPlay = audio.play;
+      audio.play = function() {
+        const self = this;
+        this.__playing = true;
+        const result = this.__originalPlay.apply(this, arguments);
+        if (result && result.then) {
+          result.then(() => {
+            setTimeout(() => { self.__playing = false; }, this.duration * 1000 + 100);
+          }).catch(() => {
+            self.__playing = false;
+          });
+        } else {
+          setTimeout(() => { self.__playing = false; }, audio.duration * 1000 + 100);
+        }
+        return result;
+      };
+      return audio;
+    };
+
+    window.Audio.prototype = OriginalAudio.prototype;
+  }
+
+  // =========================================================================
+  //  MODULE 15: ACCESSIBILITY — Remove Chat UI
+  // =========================================================================
+  function setupChatRemoval() {
+    if (window.__stripChatLoaded) return;
+    window.__stripChatLoaded = true;
+
+    function removeChat() {
+      const chatSelectors = [
+        '.panel-right',
+        '[class*="chat"]',
+        '[id*="chat"]',
+        '[class*="conversation"]',
+        '[class*="messenger"]'
+      ];
+
+      chatSelectors.forEach(selector => {
+        try {
+          document.querySelectorAll(selector).forEach(el => {
+            if (el && el.parentNode) {
+              el.remove();
+            }
+          });
+        } catch (e) {}
+      });
+    }
+
+    removeChat();
+    setInterval(removeChat, 500);
+  }
+
+  // =========================================================================
   //  INIT
   // =========================================================================
   function init() {
@@ -3668,6 +3745,10 @@
     setupImageLazyLoading();
     setupDOMCleanup();
     removeAllAnimations();
+    setupAudioOptimizer();
+
+    // Accessibility: remove chat UI
+    setupChatRemoval();
 
     // Battle hooks (victory skip + announcements)
     setupBattleHooks();
