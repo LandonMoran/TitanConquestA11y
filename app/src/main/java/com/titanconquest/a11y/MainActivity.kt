@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private var logUri: Uri? = null
     private val logBuffer = StringBuilder()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    private val MAX_LOG_SIZE = 5 * 1024 * 1024 // 5 MB max log size
 
     private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
         if (uri != null) {
@@ -533,7 +534,11 @@ class MainActivity : ComponentActivity() {
             val logLine = "[$timestamp] $message\n"
 
             synchronized(logBuffer) {
-                logBuffer.append(logLine)
+                if (logBuffer.length < MAX_LOG_SIZE) {
+                    logBuffer.append(logLine)
+                } else if (logBuffer.length == MAX_LOG_SIZE) {
+                    logBuffer.append("\n[LOG SIZE LIMIT REACHED - Further logs will be truncated]\n")
+                }
             }
 
             Log.d("GameLog", message)

@@ -62,10 +62,14 @@
   //  Press F4 to open the log file.
   // =========================================================================
   const BW2_BUILD_TAG = "bw2-2026-05";
+  let isLoggingFromDlog = false;
   function dlog(level, ...args) {
+    if (isLoggingFromDlog) return;
+    isLoggingFromDlog = true;
     const lvl = level === "error" ? "error" : level === "warn" ? "warn" : "log";
     try { console[lvl]("[BW2]", ...args); } catch (_) {}
     try { if (typeof window.__bw2Log === "function") window.__bw2Log(level || "log", ...args); } catch (_) {}
+    isLoggingFromDlog = false;
   }
   function dwarn(...a) { dlog("warn", ...a); }
   function derr(...a) { dlog("error", ...a); }
@@ -198,10 +202,15 @@
   // Comprehensive resource and navigation logging - captures ALL network activity
   // including HTML, PHP, JS, CSS, images, fonts, etc. with full details
   function installComprehensiveNetworkLogger() {
-    // Log all resource loads via Performance API
+    // Log all resource loads via Performance API (with deduplication)
     try {
+      const seenResources = new Set();
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
+          const key = entry.name + "|" + entry.entryType;
+          if (seenResources.has(key)) continue;
+          seenResources.add(key);
+
           if (entry.entryType === "resource") {
             dlog("info", `RESOURCE ${entry.initiatorType.toUpperCase()} ${entry.name} (${Math.round(entry.duration)}ms, ${Math.round(entry.transferSize || 0)}B)`);
           } else if (entry.entryType === "navigation") {
