@@ -111,18 +111,23 @@ class MainActivity : ComponentActivity() {
         val devices = android.view.InputDevice.getDeviceIds()
         val gamepads = devices.mapNotNull { id ->
             val device = android.view.InputDevice.getDevice(id)
-            if (device != null && (device.sources and (android.view.InputDevice.MOTION_RANGE_X)) != 0) {
-                "${device.name} (${device.descriptor})"
+            if (device != null) {
+                val sources = device.sources
+                if ((sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0 ||
+                    (sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
+                    device.name
+                } else {
+                    null
+                }
             } else {
                 null
             }
         }
 
         if (gamepads.isNotEmpty()) {
-            Log.i("GameController", "✓ Controllers detected: ${gamepads.joinToString(" | ")}")
-            gamepads.forEach { Log.i("GameController", "  → $it") }
+            Log.i("GameController", "Controllers detected: ${gamepads.joinToString(", ")}")
         } else {
-            Log.w("GameController", "⚠ No game controllers detected yet (may connect later)")
+            Log.w("GameController", "No game controllers detected")
         }
     }
 
