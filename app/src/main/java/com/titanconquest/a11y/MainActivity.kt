@@ -376,8 +376,16 @@ class MainActivity : ComponentActivity() {
                 if (allItems.length === 0) allItems = document.querySelectorAll('a.link, a[href]');
                 if (allItems.length === 0) allItems = document.querySelectorAll('li, [role="listitem"]');
                 if (allItems.length === 0) allItems = document.querySelectorAll('button, [role="button"]');
-                if (allItems.length === 0) allItems = document.querySelectorAll('[tabindex="0"], [tabindex="1"]');
-                if (allItems.length === 0) allItems = document.querySelectorAll('.card, .item');
+                if (allItems.length === 0) allItems = document.querySelectorAll('.card, .item, .shop-item');
+                if (allItems.length === 0) allItems = document.querySelectorAll('[onclick], [data-action]');
+                if (allItems.length === 0) {
+                    // Last resort: find all elements with specific classes that look clickable
+                    const clickables = Array.from(document.querySelectorAll('*')).filter(el => {
+                        const style = window.getComputedStyle(el);
+                        return (style.cursor === 'pointer' || el.classList.toString().includes('click') || el.classList.toString().includes('btn'));
+                    });
+                    if (clickables.length > 0) allItems = clickables;
+                }
 
                 if (allItems.length === 0) {
                     // Fallback to window scroll if no items found
@@ -394,20 +402,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Calculate next index
+                // Calculate next index (wrap around)
                 let nextIndex = currentIndex + (dir === 'next' ? 1 : -1);
-                if (nextIndex < 0) nextIndex = 0;
-                if (nextIndex >= allItems.length) nextIndex = allItems.length - 1;
+                if (nextIndex < 0) nextIndex = allItems.length - 1;
+                if (nextIndex >= allItems.length) nextIndex = 0;
 
                 const nextItem = allItems[nextIndex];
                 if (nextItem) {
-                    // If it's not focusable, try to focus a child link
+                    // If it's not focusable, try to focus a child link or make it focusable
                     if (nextItem.tagName !== 'A' && nextItem.tagName !== 'BUTTON') {
                         const link = nextItem.querySelector('a, button, [role="button"]');
                         if (link) {
                             link.focus();
                             link.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         } else {
+                            // Make the element focusable
+                            if (!nextItem.hasAttribute('tabindex')) {
+                                nextItem.setAttribute('tabindex', '0');
+                            }
                             nextItem.focus();
                             nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         }
