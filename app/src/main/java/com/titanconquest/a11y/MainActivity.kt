@@ -568,5 +568,6 @@ class MainActivity : ComponentActivity() {
 
             Log.println(priority, tag, text)
             writeLog("[$tag] $text")
+        }
     }
 }
