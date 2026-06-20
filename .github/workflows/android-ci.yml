@@ -150,11 +150,32 @@ jobs:
           echo "  KEY_PASSWORD length: ${#KEY_PASSWORD}"
           echo ""
           echo "Running gradle build..."
-          ./gradlew assembleRelease --no-daemon 2>&1 | tail -100
+          ./gradlew assembleRelease --stacktrace --no-daemon
+          echo ""
+          echo "Build output:"
+          find app/build/outputs/apk/release -type f || echo "No files in release output"
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Creating release for ${{ github.ref_name }}"
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "Accessible Android client for Titan Conquest - ${{ github.ref_name }}" \
+            || echo "Release may already exist"
 
       - name: Publish Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-          [ -f "$APK" ] && gh release upload "${{ github.ref_name }}" "$APK" --clobber || echo "No APK"
+          if [ -z "$APK" ]; then
+            echo "ERROR: No APK found in app/build/outputs/apk/release"
+            find app/build/outputs -type f -name "*.apk" || true
+            exit 1
+          fi
+          echo "Found APK: $APK"
+          echo "Uploading to release ${{ github.ref_name }}..."
+          gh release upload "${{ github.ref_name }}" "$APK" --clobber
+          echo "Release complete!"
