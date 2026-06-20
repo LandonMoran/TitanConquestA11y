@@ -442,6 +442,19 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Prevent key repeat events from being processed
+        // Only process on first press (repeat count == 0)
+        if (event?.repeatCount != 0) {
+            return when (keyCode) {
+                KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BUTTON_X,
+                KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
+                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_SELECT,
+                KeyEvent.KEYCODE_BUTTON_THUMBL, KeyEvent.KEYCODE_BUTTON_THUMBR,
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> true // Consume repeats
+                else -> super.onKeyDown(keyCode, event)
+            }
+        }
+
         return when (keyCode) {
             KeyEvent.KEYCODE_BUTTON_A -> {
                 showButtonToast("A - Attack")
@@ -522,6 +535,9 @@ class MainActivity : ComponentActivity() {
 
     private var ltTriggerPressed = false
     private var rtTriggerPressed = false
+
+    // Track pressed keys to prevent repeated onKeyDown events from triggering multiple injections
+    private val pressedKeys = mutableSetOf<Int>()
 
     private fun getCenteredAxis(event: MotionEvent, axis: Int): Float {
         val range = event.device?.getMotionRange(axis, MotionEvent.TOOL_TYPE_UNKNOWN)
