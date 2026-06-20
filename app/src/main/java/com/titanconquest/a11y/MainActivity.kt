@@ -45,12 +45,18 @@ import java.util.*
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
-    private var logWriter: BufferedWriter? = null
+    private var logUri: Uri? = null
+    private val logBuffer = StringBuilder()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
         if (uri != null) {
-            initializeLogging(uri)
+            logUri = uri
+            logBuffer.append("================================================================================\n")
+            logBuffer.append("GAME SESSION STARTED: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}\n")
+            logBuffer.append("================================================================================\n")
+            android.widget.Toast.makeText(this, "✓ Logging enabled", android.widget.Toast.LENGTH_LONG).show()
+            writeLog("Logging initialized - file will be saved on app close")
         }
     }
 
@@ -208,21 +214,22 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         // Persist cookies (the session) to disk.
         CookieManager.getInstance().flush()
-        // Flush log file
-        try {
-            logWriter?.flush()
-        } catch (e: Exception) {
-            Log.e("GameLog", "Error flushing log on pause", e)
-        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Close log file
-        try {
-            logWriter?.close()
-        } catch (e: Exception) {
-            Log.e("GameLog", "Error closing log", e)
+        // Write all buffered logs to file on app close
+        if (logUri != null && logBuffer.isNotEmpty()) {
+            try {
+                val outputStream = contentResolver.openOutputStream(logUri!!) ?: return
+                outputStream.bufferedWriter().use { writer ->
+                    writer.write(logBuffer.toString())
+                    writer.flush()
+                }
+                Log.i("GameLog", "Session log saved successfully (${logBuffer.length} bytes)")
+            } catch (e: Exception) {
+                Log.e("GameLog", "Error saving log file: ${e.message}", e)
+            }
         }
     }
 
@@ -399,40 +406,13 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
-    private fun initializeLogging(uri: Uri) {
-        try {
-            val outputStream = contentResolver.openOutputStream(uri) ?: return
-            logWriter = outputStream.bufferedWriter()
-
-            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-            logWriter?.write("================================================================================\n")
-            logWriter?.write("GAME SESSION STARTED: $timestamp\n")
-            logWriter?.write("================================================================================\n")
-            logWriter?.flush()
-
-            android.widget.Toast.makeText(
-                this,
-                "✓ Logging started",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-
-            writeLog("Logging initialized successfully")
-        } catch (e: Exception) {
-            Log.e("Logging", "Failed to initialize log file", e)
-            android.widget.Toast.makeText(this, "Log error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
-
     private fun writeLog(message: String) {
         try {
             val timestamp = dateFormat.format(Date())
-            val logLine = "[$timestamp] $message"
+            val logLine = "[$timestamp] $message\n"
 
-            if (logWriter != null) {
-                synchronized(logWriter!!) {
-                    logWriter?.write("$logLine\n")
-                    logWriter?.flush()
-                }
+            synchronized(logBuffer) {
+                logBuffer.append(logLine)
             }
 
             Log.d("GameLog", message)
