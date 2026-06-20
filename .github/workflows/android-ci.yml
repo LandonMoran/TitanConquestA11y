@@ -141,7 +141,16 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          echo "Environment check:"
+          echo "  KEYSTORE_FILE: $KEYSTORE_FILE"
+          echo "  File exists: $(test -f "$KEYSTORE_FILE" && echo yes || echo no)"
+          echo "  KEYSTORE_PASSWORD length: ${#KEYSTORE_PASSWORD}"
+          echo "  KEY_ALIAS: $KEY_ALIAS"
+          echo "  KEY_PASSWORD length: ${#KEY_PASSWORD}"
+          echo ""
+          echo "Running gradle build..."
+          ./gradlew assembleRelease --no-daemon 2>&1 | tail -100
 
       - name: Copy APK
         run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-${{ github.ref_name }}.apk
