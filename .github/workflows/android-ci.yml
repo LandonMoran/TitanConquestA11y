@@ -164,38 +164,28 @@ jobs:
       - name: Rename Release APK
         run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
 
+      - name: Verify APK is ready
+        run: |
+          echo "Checking if APK exists before release..."
+          if [ ! -f TitanConquestA11y-release.apk ]; then
+            echo "ERROR: TitanConquestA11y-release.apk not found!"
+            ls -lh *.apk 2>/dev/null || echo "No APK files in current directory"
+            exit 1
+          fi
+          echo "✓ APK ready: $(ls -lh TitanConquestA11y-release.apk)"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -x
           TAG="${{ github.ref_name }}"
+          echo "Creating release for tag: $TAG"
+
           gh release create "$TAG" \
             --title "TitanConquest A11y $TAG" \
-            --notes "$(cat <<'EOF'
-          ## TitanConquest Accessibility Client — ${{ github.ref_name }}
-
-          An accessible Android client for [Titan Conquest](https://titanconquest.com), built for blind and visually impaired players using TalkBack.
-
-          ### What this does
-          - **Full TalkBack support** — every screen, button, stat, and enemy has a meaningful content description so TalkBack reads the right thing
-          - **Patrol & combat** — browse enemies, see their HP and tier, and launch Primary / Special / Heavy attacks all via swipe navigation
-          - **Hero stats** — HP, XP, Drachma, Power, and Location Points read aloud with progress context
-          - **Locations** — see which areas are unlocked and travel between them
-          - **Bounties** — accept and claim daily bounties with progress tracking
-          - **Chat** — read global and clan chat, send messages
-          - **Gear** — browse your inventory with rarity, slot, perks, and infusion level announced
-          - **WCAG AA/AAA colours** — high-contrast Material 3 theme works for low-vision users without TalkBack
-
-          ### Installation
-          Download the APK below and sideload it, or install via ADB:
-          ```
-          adb install TitanConquestA11y-release.apk
-          ```
-
-          ### Notes
-          - Requires Android 8.0 (API 26) or higher
-          - Needs an existing Titan Conquest account at titanconquest.com
-          EOF
-          )" \
+            --notes "An accessible Android client for Titan Conquest, built with full TalkBack support. Download the APK and install via ADB or sideload." \
             --prerelease \
             TitanConquestA11y-release.apk
+
+          echo "✓ Release created successfully"
