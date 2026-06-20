@@ -371,30 +371,50 @@ class MainActivity : ComponentActivity() {
                 const dir = '$direction';
                 const focused = document.activeElement;
 
-                // Try to find a list item to focus on
-                const allListItems = document.querySelectorAll('a.item-link, li, [role="listitem"], .list-block a');
-                if (allListItems.length === 0) {
-                    // Fallback to window scroll if no list items
+                // Try to find focusable/clickable elements in order of preference
+                let allItems = document.querySelectorAll('a.item-link');
+                if (allItems.length === 0) allItems = document.querySelectorAll('a.link, a[href]');
+                if (allItems.length === 0) allItems = document.querySelectorAll('li, [role="listitem"]');
+                if (allItems.length === 0) allItems = document.querySelectorAll('button, [role="button"]');
+                if (allItems.length === 0) allItems = document.querySelectorAll('[tabindex="0"], [tabindex="1"]');
+                if (allItems.length === 0) allItems = document.querySelectorAll('.card, .item');
+
+                if (allItems.length === 0) {
+                    // Fallback to window scroll if no items found
                     window.scrollBy(0, dir === 'next' ? 300 : -300);
                     return;
                 }
 
+                // Find currently focused item
                 let currentIndex = -1;
-                for (let i = 0; i < allListItems.length; i++) {
-                    if (allListItems[i] === focused) {
+                for (let i = 0; i < allItems.length; i++) {
+                    if (allItems[i] === focused || allItems[i].contains(focused)) {
                         currentIndex = i;
                         break;
                     }
                 }
 
-                let nextIndex = dir === 'next' ? currentIndex + 1 : currentIndex - 1;
+                // Calculate next index
+                let nextIndex = currentIndex + (dir === 'next' ? 1 : -1);
                 if (nextIndex < 0) nextIndex = 0;
-                if (nextIndex >= allListItems.length) nextIndex = allListItems.length - 1;
+                if (nextIndex >= allItems.length) nextIndex = allItems.length - 1;
 
-                const nextItem = allListItems[nextIndex];
+                const nextItem = allItems[nextIndex];
                 if (nextItem) {
-                    nextItem.focus();
-                    nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    // If it's not focusable, try to focus a child link
+                    if (nextItem.tagName !== 'A' && nextItem.tagName !== 'BUTTON') {
+                        const link = nextItem.querySelector('a, button, [role="button"]');
+                        if (link) {
+                            link.focus();
+                            link.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        } else {
+                            nextItem.focus();
+                            nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    } else {
+                        nextItem.focus();
+                        nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
                 }
             })();
         """.trimIndent()
