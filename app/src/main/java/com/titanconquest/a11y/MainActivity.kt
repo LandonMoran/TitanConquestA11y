@@ -1,6 +1,9 @@
 package com.titanconquest.a11y
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.util.Log
@@ -11,8 +14,12 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Bloodwar 2 — Android client.
@@ -35,6 +42,19 @@ import java.io.ByteArrayOutputStream
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
+    private var logUri: Uri? = null
+    private val logBuffer = StringBuilder()
+
+    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+        if (uri != null) {
+            logUri = uri
+            try {
+                android.widget.Toast.makeText(this, "✓ Logging enabled", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e("GameLog", "Error showing toast: ${e.message}")
+            }
+        }
+    }
 
     /** Built once from bundled assets: { "benemy.ogg": "data:audio/ogg;base64,..." }. */
     private val audioJson: String by lazy { buildAudioJson() }
@@ -47,6 +67,12 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        try {
+            promptForLogFile()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error showing log file dialog: ${e.message}")
+        }
 
         // Persistent cookies so the TQRPG session survives across launches —
         // the Electron app relies on Electron's persistent session for the same
@@ -187,10 +213,59 @@ class MainActivity : ComponentActivity() {
         CookieManager.getInstance().flush()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (logUri != null && logBuffer.isNotEmpty()) {
+            try {
+                val outputStream = contentResolver.openOutputStream(logUri!!)
+                if (outputStream != null) {
+                    outputStream.bufferedWriter().use { writer ->
+                        writer.write(logBuffer.toString())
+                        writer.flush()
+                    }
+                    Log.i("GameLog", "Log saved successfully (${logBuffer.length} bytes)")
+                }
+            } catch (e: Exception) {
+                Log.e("GameLog", "Error saving log: ${e.message}")
+            }
+        }
+    }
+
     @Suppress("MissingSuperCall", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         // In-app back navigation through the game's history before exiting.
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    }
+
+    private fun promptForLogFile() {
+        try {
+            AlertDialog.Builder(this)
+                .setTitle("Enable Logging?")
+                .setMessage("Save diagnostic logs when you close the app?")
+                .setPositiveButton("Yes, Save Log") { _, _ ->
+                    try {
+                        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                        createDocumentLauncher.launch("titanconquest_$timestamp.log")
+                    } catch (e: Exception) {
+                        Log.e("GameLog", "Error opening file picker: ${e.message}")
+                    }
+                }
+                .setNegativeButton("No Logging") { _, _ ->
+                    logUri = null
+                }
+                .setCancelable(false)
+                .show()
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error creating log file dialog: ${e.message}")
+        }
+    }
+
+    private fun writeLog(message: String) {
+        if (logUri != null) {
+            synchronized(logBuffer) {
+                logBuffer.append(message).append("\n")
+            }
+        }
     }
 
     /** Native implementation of the two globals enhancer.js depends on. */
@@ -210,6 +285,7 @@ class MainActivity : ComponentActivity() {
                 "BW2",
                 text
             )
+            writeLog("[$level] $text")
         }
     }
 }
