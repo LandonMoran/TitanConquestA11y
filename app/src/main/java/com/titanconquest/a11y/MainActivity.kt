@@ -166,6 +166,37 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
 
+        val stripChat = """
+            (function () {
+              if (window.__stripChatLoaded) return;
+              window.__stripChatLoaded = true;
+
+              function removeChat() {
+                var chatSelectors = [
+                  '.panel-right',
+                  '[class*="chat"]',
+                  '[id*="chat"]',
+                  '[class*="conversation"]',
+                  '[class*="messenger"]'
+                ];
+
+                chatSelectors.forEach(function(selector) {
+                  try {
+                    var elements = document.querySelectorAll(selector);
+                    elements.forEach(function(el) {
+                      if (el && el.parentNode) {
+                        el.remove();
+                      }
+                    });
+                  } catch (e) {}
+                });
+              }
+
+              removeChat();
+              setInterval(removeChat, 500);
+            })();
+        """.trimIndent()
+
         val victoryAutoReturn = """
             (function () {
               if (window.__victoryDetectorLoaded) return;
@@ -203,7 +234,9 @@ class MainActivity : ComponentActivity() {
 
         view.evaluateJavascript(bootstrap) {
             view.evaluateJavascript(enhancerJs, null) { _ ->
-                view.evaluateJavascript(victoryAutoReturn, null)
+                view.evaluateJavascript(stripChat, null) { _ ->
+                    view.evaluateJavascript(victoryAutoReturn, null)
+                }
             }
         }
     }
