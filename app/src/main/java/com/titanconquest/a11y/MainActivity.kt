@@ -180,6 +180,51 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
 
+        val audioOptimizer = """
+            (function () {
+              if (window.__audioOptimizerLoaded) return;
+              window.__audioOptimizerLoaded = true;
+
+              var OriginalAudio = window.Audio;
+              var audioPool = {};
+
+              window.Audio = function(src) {
+                try {
+                  if (src && window.__bw2Audio && window.__bw2Audio[src]) {
+                    if (!audioPool[src]) {
+                      audioPool[src] = [];
+                    }
+                    var pooledAudio = audioPool[src].find(function(a) { return !a.__playing; });
+                    if (pooledAudio) {
+                      return pooledAudio;
+                    }
+                  }
+                } catch (e) {}
+
+                var audio = new OriginalAudio(src);
+                audio.__originalPlay = audio.play;
+                audio.play = function() {
+                  var self = this;
+                  this.__playing = true;
+                  var result = this.__originalPlay.apply(this, arguments);
+                  if (result && result.then) {
+                    result.then(function() {
+                      setTimeout(function() { self.__playing = false; }, this.duration * 1000 + 100);
+                    }).catch(function() {
+                      self.__playing = false;
+                    });
+                  } else {
+                    setTimeout(function() { self.__playing = false; }, audio.duration * 1000 + 100);
+                  }
+                  return result;
+                };
+                return audio;
+              };
+
+              window.Audio.prototype = OriginalAudio.prototype;
+            })();
+        """.trimIndent()
+
         val stripChat = """
             (function () {
               if (window.__stripChatLoaded) return;
@@ -285,9 +330,11 @@ class MainActivity : ComponentActivity() {
         """.trimIndent()
 
         view.evaluateJavascript(bootstrap) {
-            view.evaluateJavascript(enhancerJs, null) { _ ->
-                view.evaluateJavascript(stripChat, null) { _ ->
-                    view.evaluateJavascript(hardvenVictorySkip, null)
+            view.evaluateJavascript(audioOptimizer, null) { _ ->
+                view.evaluateJavascript(enhancerJs, null) { _ ->
+                    view.evaluateJavascript(stripChat, null) { _ ->
+                        view.evaluateJavascript(hardvenVictorySkip, null)
+                    }
                 }
             }
         }
