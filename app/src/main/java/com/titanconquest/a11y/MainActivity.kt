@@ -361,8 +361,27 @@ class MainActivity : ComponentActivity() {
                 injectKeyEventWithModifier("v", altKey = true)
                 true
             }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                showButtonToast("D-Pad Down")
+                scrollPage(300)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                showButtonToast("D-Pad Up")
+                scrollPage(-300)
+                true
+            }
             else -> super.onKeyDown(keyCode, event)
         }
+    }
+
+    private fun scrollPage(pixels: Int) {
+        val jsCode = """
+            (function() {
+                window.scrollBy(0, $pixels);
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(jsCode, null)
     }
 
     private fun showButtonToast(message: String) {
