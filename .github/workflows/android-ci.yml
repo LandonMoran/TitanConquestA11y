@@ -156,23 +156,43 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
+          echo "Step 1: List outputs directory"
+          ls -la app/build/outputs/ || echo "outputs dir not found"
 
-          # Find the APK
+          echo ""
+          echo "Step 2: Find APK files"
+          find app/build/outputs -name "*.apk" -type f
+
+          echo ""
+          echo "Step 3: Get first APK"
           APK_FILE=$(find app/build/outputs -name "*.apk" -type f | head -1)
-          if [ -z "$APK_FILE" ]; then
-            echo "ERROR: No APK file found!"
+          echo "APK_FILE='$APK_FILE'"
+
+          if [ ! -z "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
+            echo "✓ APK exists: $APK_FILE"
+            ls -lh "$APK_FILE"
+
+            echo ""
+            echo "Step 4: Copy APK"
+            cp "$APK_FILE" "app.apk"
+            ls -lh app.apk
+
+            echo ""
+            echo "Step 5: Create or upload release"
+            TAG="${{ github.ref_name }}"
+            echo "TAG=$TAG"
+
+            gh release create "$TAG" app.apk \
+              --title "TitanConquest A11y $TAG" \
+              --notes "Accessible Android client for Titan Conquest" \
+              --prerelease 2>&1 || true
+
+            echo ""
+            echo "Step 6: If create failed, try upload"
+            gh release upload "$TAG" app.apk --clobber 2>&1 || echo "Upload failed too"
+
+            echo "✓ Done"
+          else
+            echo "ERROR: APK not found"
             exit 1
           fi
-
-          echo "✓ Found APK: $APK_FILE"
-          cp "$APK_FILE" "app.apk"
-
-          # Create the release (this will fail if it already exists, which is fine)
-          TAG="${{ github.ref_name }}"
-          gh release create "$TAG" app.apk \
-            --title "TitanConquest A11y $TAG" \
-            --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
-            --prerelease 2>/dev/null || gh release upload "$TAG" app.apk --clobber
-
-          echo "✓ Release $TAG published with APK"
