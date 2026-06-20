@@ -152,27 +152,27 @@ jobs:
           echo "Running gradle build..."
           ./gradlew assembleRelease --no-daemon 2>&1 | tail -100
 
-      - name: Publish Release
+      - name: Create or Update Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -x
-          echo "Finding APK..."
-          find app/build/outputs -name "*.apk" -type f
+          set -e
 
-          # Get the first APK found
+          # Find the APK
           APK_FILE=$(find app/build/outputs -name "*.apk" -type f | head -1)
-
           if [ -z "$APK_FILE" ]; then
             echo "ERROR: No APK file found!"
             exit 1
           fi
 
           echo "✓ Found APK: $APK_FILE"
-          cp "$APK_FILE" "release.apk"
-          ls -lh release.apk
+          cp "$APK_FILE" "app.apk"
 
-          # Upload to release
+          # Create the release (this will fail if it already exists, which is fine)
           TAG="${{ github.ref_name }}"
-          gh release upload "$TAG" release.apk --clobber
-          echo "✓ APK uploaded to release $TAG"
+          gh release create "$TAG" app.apk \
+            --title "TitanConquest A11y $TAG" \
+            --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
+            --prerelease 2>/dev/null || gh release upload "$TAG" app.apk --clobber
+
+          echo "✓ Release $TAG published with APK"
