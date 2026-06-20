@@ -156,25 +156,46 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Find and copy the APK
+          echo "=== Release Publishing Step ==="
+          echo "Workspace: $(pwd)"
+          echo "Git ref: ${{ github.ref }}"
+          echo "Git ref_name: ${{ github.ref_name }}"
+          echo ""
+
+          echo "Searching for APK files..."
+          find app/build/outputs -name "*.apk" 2>/dev/null || echo "  (no files found)"
+          echo ""
+
+          echo "Attempting to find and publish APK..."
+          FOUND=0
           for apk in app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app*.apk; do
             if [ -f "$apk" ]; then
-              echo "✓ Found APK: $apk"
+              echo "✓ Found: $apk ($(stat -c%s "$apk") bytes)"
               cp "$apk" "TitanConquestA11y.apk"
+              echo "✓ Copied to: TitanConquestA11y.apk"
               ls -lh TitanConquestA11y.apk
-
-              # Create or update the release
-              TAG="${{ github.ref_name }}"
-              if gh release view "$TAG" > /dev/null 2>&1; then
-                echo "✓ Release $TAG already exists, uploading APK..."
-                gh release upload "$TAG" TitanConquestA11y.apk --clobber
-              else
-                echo "✓ Creating release $TAG..."
-                gh release create "$TAG" TitanConquestA11y.apk \
-                  --title "TitanConquest A11y $TAG" \
-                  --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
-                  --prerelease
-              fi
+              FOUND=1
               break
             fi
           done
+
+          if [ $FOUND -eq 1 ]; then
+            TAG="${{ github.ref_name }}"
+            echo ""
+            echo "Checking if release $TAG exists..."
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              echo "✓ Release exists, uploading APK..."
+              gh release upload "$TAG" TitanConquestA11y.apk --clobber
+            else
+              echo "✓ Creating new release $TAG..."
+              gh release create "$TAG" TitanConquestA11y.apk \
+                --title "TitanConquest A11y $TAG" \
+                --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
+                --prerelease
+            fi
+            echo "✓ Release published!"
+          else
+            echo "ERROR: APK file not found!"
+            ls -la app/build/outputs/ || echo "  (outputs dir not found)"
+            exit 1
+          fi
