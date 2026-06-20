@@ -353,22 +353,49 @@ class MainActivity : ComponentActivity() {
             }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
                 showButtonToast("D-Pad Down")
-                scrollPage(300)
+                navigateList("next")
                 true
             }
             KeyEvent.KEYCODE_DPAD_UP -> {
                 showButtonToast("D-Pad Up")
-                scrollPage(-300)
+                navigateList("prev")
                 true
             }
             else -> super.onKeyDown(keyCode, event)
         }
     }
 
-    private fun scrollPage(pixels: Int) {
+    private fun navigateList(direction: String) {
         val jsCode = """
             (function() {
-                window.scrollBy(0, $pixels);
+                const dir = '$direction';
+                const focused = document.activeElement;
+
+                // Try to find a list item to focus on
+                const allListItems = document.querySelectorAll('a.item-link, li, [role="listitem"], .list-block a');
+                if (allListItems.length === 0) {
+                    // Fallback to window scroll if no list items
+                    window.scrollBy(0, dir === 'next' ? 300 : -300);
+                    return;
+                }
+
+                let currentIndex = -1;
+                for (let i = 0; i < allListItems.length; i++) {
+                    if (allListItems[i] === focused) {
+                        currentIndex = i;
+                        break;
+                    }
+                }
+
+                let nextIndex = dir === 'next' ? currentIndex + 1 : currentIndex - 1;
+                if (nextIndex < 0) nextIndex = 0;
+                if (nextIndex >= allListItems.length) nextIndex = allListItems.length - 1;
+
+                const nextItem = allListItems[nextIndex];
+                if (nextItem) {
+                    nextItem.focus();
+                    nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
             })();
         """.trimIndent()
         webView.evaluateJavascript(jsCode, null)
