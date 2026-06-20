@@ -143,13 +143,20 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Publish Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
-          gh release create "${{ github.ref_name }}" \
-            --title "TitanConquest A11y ${{ github.ref_name }}" \
-            --notes "Accessible Android client for Titan Conquest" \
-            --prerelease \
-            TitanConquestA11y-release.apk
+      - name: Copy APK
+        run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-${{ github.ref_name }}.apk
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk-${{ github.ref_name }}
+          path: TitanConquestA11y-*.apk
+          retention-days: 30
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: TitanConquestA11y-*.apk
+          body: "Accessible Android client for Titan Conquest with full TalkBack support."
+          prerelease: true
