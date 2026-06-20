@@ -31,9 +31,21 @@ jobs:
       - name: Upload APK to target release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.release_tag }}
         run: |
-          APK=$(ls /tmp/*.apk | head -1)
-          echo "Uploading $APK to ${{ github.event.inputs.release_tag }}"
-          gh release upload "${{ github.event.inputs.release_tag }}" "$APK" \
+          SRC=$(ls /tmp/*.apk | head -1)
+          # Publish under a clean, version-stamped name (no "debug" in it).
+          CLEAN="TitanConquestA11y-${TAG#v}.apk"
+          cp "$SRC" "$CLEAN"
+          echo "Uploading $CLEAN to $TAG"
+          # Remove any stale differently-named asset (e.g. an old -debug.apk)
+          # so the release ends up with exactly one APK.
+          for old in $(gh release view "$TAG" -R LandonMoran/TitanConquestA11y \
+                        --json assets -q '.assets[].name' | grep '\.apk$' || true); do
+            if [ "$old" != "$CLEAN" ]; then
+              gh release delete-asset "$TAG" "$old" -R LandonMoran/TitanConquestA11y --yes || true
+            fi
+          done
+          gh release upload "$TAG" "$CLEAN" \
             -R LandonMoran/TitanConquestA11y \
             --clobber
