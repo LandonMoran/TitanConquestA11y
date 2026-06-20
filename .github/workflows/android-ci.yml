@@ -47,7 +47,17 @@ jobs:
           path: app/build/reports/tests/
           retention-days: 7
 
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > app/titanconquest.jks
+
       - name: Build Debug APK
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/app/titanconquest.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Rename APK
