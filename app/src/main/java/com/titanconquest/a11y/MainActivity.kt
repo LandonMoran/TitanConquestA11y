@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
         setContentView(webView)
 
         Log.i("GameController", "App started - controller input listening active")
+        android.widget.Toast.makeText(this, "Controller ready", android.widget.Toast.LENGTH_SHORT).show()
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
@@ -207,6 +208,7 @@ class MainActivity : ComponentActivity() {
         // LT (> 0.5) = "/" (go to next area)
         if (leftTrigger > 0.5f && !ltTriggerPressed) {
             ltTriggerPressed = true
+            showButtonToast("LT - Next Area")
             injectKeyEvent("/")
         } else if (leftTrigger <= 0.5f && ltTriggerPressed) {
             ltTriggerPressed = false
@@ -215,6 +217,7 @@ class MainActivity : ComponentActivity() {
         // RT (> 0.5) = "r" (use remedy)
         if (rightTrigger > 0.5f && !rtTriggerPressed) {
             rtTriggerPressed = true
+            showButtonToast("RT - Remedy")
             injectKeyEvent("r")
         } else if (rightTrigger <= 0.5f && rtTriggerPressed) {
             rtTriggerPressed = false
@@ -226,48 +229,61 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_BUTTON_A -> {
-                Log.d("GameController", "Button A pressed")
+                showButtonToast("A - Attack")
                 injectKeyEvent("1")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_B -> {
+                showButtonToast("B - Special")
                 injectKeyEvent("2")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_X -> {
+                showButtonToast("X - Heavy")
                 injectKeyEvent("3")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_Y -> {
+                showButtonToast("Y - Super")
                 injectKeyEvent("4")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_L1 -> {
+                showButtonToast("LB - Cover")
                 injectKeyEvent("5")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> {
+                showButtonToast("RB - Look Around")
                 injectKeyEvent("[")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_START -> {
+                showButtonToast("Start - Home")
                 injectKeyEventWithModifier("h", altKey = true)
                 true
             }
             KeyEvent.KEYCODE_BUTTON_SELECT -> {
+                showButtonToast("Select - Escape")
                 injectKeyEvent("Escape")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_THUMBL -> {
+                showButtonToast("LS - Stats")
                 injectKeyEvent("x")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_THUMBR -> {
+                showButtonToast("RS - Skip Victory")
                 injectKeyEventWithModifier("v", altKey = true)
                 true
             }
             else -> super.onKeyDown(keyCode, event)
         }
+    }
+
+    private fun showButtonToast(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private var ltTriggerPressed = false
