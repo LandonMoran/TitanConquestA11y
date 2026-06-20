@@ -20,8 +20,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileWriter
+import java.io.BufferedWriter
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -46,9 +45,14 @@ import java.util.*
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
-    private var logFile: File? = null
-    private var logWriter: FileWriter? = null
+    private var logWriter: BufferedWriter? = null
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+        if (uri != null) {
+            initializeLogging(uri)
+        }
+    }
 
     /** Built once from bundled assets: { "benemy.ogg": "data:audio/ogg;base64,..." }. */
     private val audioJson: String by lazy { buildAudioJson() }
@@ -58,17 +62,10 @@ class MainActivity : ComponentActivity() {
         assets.open("enhancer.js").bufferedReader().use { it.readText() }
     }
 
-    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
-        if (uri != null) {
-            initializeLogging(uri)
-        }
-    }
-
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Prompt for log file location
         promptForLogFile()
 
         // Persistent cookies so the TQRPG session survives across launches —
@@ -157,74 +154,6 @@ class MainActivity : ComponentActivity() {
                 }
               } catch (e) {}
             })();
-
-            // ===== COMPREHENSIVE ACTIVITY LOGGING =====
-            (function() {
-              var activityLog = [];
-
-              // Log all fetch/XHR requests
-              var origFetch = window.fetch;
-              window.fetch = function() {
-                var args = Array.prototype.slice.call(arguments);
-                var url = args[0];
-                window.__bw2Log('info', 'FETCH:', typeof url === 'string' ? url : url.url, 'method:', args[1]?.method || 'GET');
-                return origFetch.apply(this, arguments);
-              };
-
-              var origXHR = XMLHttpRequest.prototype.open;
-              XMLHttpRequest.prototype.open = function(method, url) {
-                window.__bw2Log('info', 'XHR:', method, url);
-                return origXHR.apply(this, arguments);
-              };
-
-              // Log all clicks
-              document.addEventListener('click', function(e) {
-                var target = e.target;
-                var text = target.textContent?.substring(0, 50) || target.className || target.id || 'unknown';
-                window.__bw2Log('info', 'CLICK:', text, 'class:', target.className, 'id:', target.id);
-              }, true);
-
-              // Log all form submissions
-              document.addEventListener('submit', function(e) {
-                window.__bw2Log('info', 'SUBMIT:', e.target.action || 'unknown', 'fields:', Object.keys(new FormData(e.target)).join(','));
-              }, true);
-
-              // Log key events
-              document.addEventListener('keydown', function(e) {
-                window.__bw2Log('debug', 'KEY:', e.key, 'code:', e.code, 'keyCode:', e.keyCode);
-              }, true);
-
-              // Log DOM mutations
-              var observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(m) {
-                  if (m.type === 'childList' && m.addedNodes.length > 0) {
-                    var sample = Array.prototype.slice.call(m.addedNodes, 0, 2).map(n =>
-                      n.nodeType === 1 ? '<' + n.tagName.toLowerCase() + '>' : n.textContent?.substring(0, 30)
-                    ).join(', ');
-                    window.__bw2Log('debug', 'DOM_ADD:', sample, 'at:', m.target.className || m.target.id);
-                  }
-                  if (m.type === 'attributes') {
-                    window.__bw2Log('debug', 'ATTR_CHANGE:', m.attributeName, 'on:', m.target.className || m.target.id);
-                  }
-                });
-              });
-              observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['style', 'class', 'data-page', 'href'],
-                characterData: false
-              });
-
-              // Log storage changes
-              var origSetItem = Storage.prototype.setItem;
-              Storage.prototype.setItem = function(key, val) {
-                window.__bw2Log('info', 'STORAGE_SET:', key, '=', typeof val === 'string' ? val.substring(0, 100) : val);
-                return origSetItem.call(this, key, val);
-              };
-
-              window.__bw2Log('info', '===== GAME SESSION STARTED =====');
-            })();
         """.trimIndent()
 
         view.evaluateJavascript(bootstrap) {
@@ -279,6 +208,22 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         // Persist cookies (the session) to disk.
         CookieManager.getInstance().flush()
+        // Flush log file
+        try {
+            logWriter?.flush()
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error flushing log on pause", e)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Close log file
+        try {
+            logWriter?.close()
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error closing log", e)
+        }
     }
 
     @Suppress("MissingSuperCall", "OVERRIDE_DEPRECATION")
@@ -289,6 +234,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onGenericMotionEvent(event: MotionEvent?): Boolean {
         if (event == null) return super.onGenericMotionEvent(event)
+        if ((event.source and MotionEvent.TOOL_TYPE_UNKNOWN) == 0) return super.onGenericMotionEvent(event)
 
         // Handle analog stick triggers (LT/RT)
         val leftTrigger = getCenteredAxis(event, MotionEvent.AXIS_LTRIGGER)
@@ -378,6 +324,66 @@ class MainActivity : ComponentActivity() {
     private var ltTriggerPressed = false
     private var rtTriggerPressed = false
 
+    private fun getCenteredAxis(event: MotionEvent, axis: Int): Float {
+        val range = event.device?.getMotionRange(axis, MotionEvent.TOOL_TYPE_UNKNOWN)
+        val flat = range?.flat ?: 0f
+        val value = event.getAxisValue(axis)
+        return if (Math.abs(value) > flat) value else 0f
+    }
+
+    private fun injectKeyEvent(keyValue: String) {
+        val jsCode = """
+            (function() {
+                const event = new KeyboardEvent('keydown', {
+                    key: '$keyValue',
+                    code: 'Key${keyValue.uppercase()}',
+                    keyCode: getKeyCode('$keyValue'),
+                    bubbles: true,
+                    cancelable: true
+                });
+                document.dispatchEvent(event);
+            })();
+
+            function getKeyCode(key) {
+                const keyMap = {
+                    '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
+                    'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
+                    'h': 72
+                };
+                return keyMap[key] || 0;
+            }
+        """.trimIndent()
+        webView.evaluateJavascript(jsCode, null)
+    }
+
+    private fun injectKeyEventWithModifier(keyValue: String, altKey: Boolean = false, ctrlKey: Boolean = false, shiftKey: Boolean = false) {
+        val jsCode = """
+            (function() {
+                const event = new KeyboardEvent('keydown', {
+                    key: '$keyValue',
+                    code: 'Key${keyValue.uppercase()}',
+                    keyCode: getKeyCode('$keyValue'),
+                    altKey: $altKey,
+                    ctrlKey: $ctrlKey,
+                    shiftKey: $shiftKey,
+                    bubbles: true,
+                    cancelable: true
+                });
+                document.dispatchEvent(event);
+            })();
+
+            function getKeyCode(key) {
+                const keyMap = {
+                    '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
+                    'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
+                    'h': 72, 'v': 86, 't': 84
+                };
+                return keyMap[key] || 0;
+            }
+        """.trimIndent()
+        webView.evaluateJavascript(jsCode, null)
+    }
+
     private fun promptForLogFile() {
         AlertDialog.Builder(this)
             .setTitle("Game Activity Logging")
@@ -395,119 +401,44 @@ class MainActivity : ComponentActivity() {
 
     private fun initializeLogging(uri: Uri) {
         try {
-            logFile = File(uri.path ?: return)
-            logWriter = contentResolver.openOutputStream(uri)?.bufferedWriter()?.let { FileWriter(uri.path ?: return) }
+            val outputStream = contentResolver.openOutputStream(uri) ?: return
+            logWriter = outputStream.bufferedWriter()
 
-            // Try to get actual file path
-            val displayName = "titanconquest_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.log"
-            logFile = File(getExternalFilesDir(null), displayName)
-            logWriter = FileWriter(logFile, true)
-
-            writeLog("=".repeat(80))
-            writeLog("GAME SESSION STARTED: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}")
-            writeLog("=".repeat(80))
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+            logWriter?.write("================================================================================\n")
+            logWriter?.write("GAME SESSION STARTED: $timestamp\n")
+            logWriter?.write("================================================================================\n")
+            logWriter?.flush()
 
             android.widget.Toast.makeText(
                 this,
-                "Logging to: ${logFile?.absolutePath}",
+                "✓ Logging started",
                 android.widget.Toast.LENGTH_LONG
             ).show()
+
+            writeLog("Logging initialized successfully")
         } catch (e: Exception) {
             Log.e("Logging", "Failed to initialize log file", e)
-            writeLog("ERROR: Failed to create log file: ${e.message}")
+            android.widget.Toast.makeText(this, "Log error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
     private fun writeLog(message: String) {
         try {
             val timestamp = dateFormat.format(Date())
-            val logLine = "[$timestamp] $message\n"
+            val logLine = "[$timestamp] $message"
 
-            logWriter?.apply {
-                write(logLine)
-                flush()
+            if (logWriter != null) {
+                synchronized(logWriter!!) {
+                    logWriter?.write("$logLine\n")
+                    logWriter?.flush()
+                }
             }
 
             Log.d("GameLog", message)
         } catch (e: Exception) {
-            Log.e("GameLog", "Error writing to log", e)
+            Log.e("GameLog", "Error writing to log: ${e.message}", e)
         }
-    }
-
-    private fun getCenteredAxis(event: MotionEvent, axis: Int): Float {
-        val range = event.device?.getMotionRange(axis, MotionEvent.TOOL_TYPE_UNKNOWN)
-        val flat = range?.flat ?: 0f
-        val value = event.getAxisValue(axis)
-        return if (Math.abs(value) > flat) value else 0f
-    }
-
-    private fun injectKeyEvent(keyValue: String) {
-        val jsCode = """
-            (function() {
-                function getCodeForKey(key) {
-                    const codeMap = {
-                        '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '4': 'Digit4', '5': 'Digit5',
-                        'r': 'KeyR', 'x': 'KeyX', 'h': 'KeyH',
-                        '[': 'BracketLeft', '/': 'Slash', 'Escape': 'Escape'
-                    };
-                    return codeMap[key] || 'Unknown';
-                }
-                function getKeyCode(key) {
-                    const keyMap = {
-                        '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
-                        'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
-                        'h': 72
-                    };
-                    return keyMap[key] || 0;
-                }
-                const event = new KeyboardEvent('keydown', {
-                    key: '$keyValue',
-                    code: getCodeForKey('$keyValue'),
-                    keyCode: getKeyCode('$keyValue'),
-                    which: getKeyCode('$keyValue'),
-                    bubbles: true,
-                    cancelable: true
-                });
-                document.dispatchEvent(event);
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(jsCode, null)
-    }
-
-    private fun injectKeyEventWithModifier(keyValue: String, altKey: Boolean = false, ctrlKey: Boolean = false, shiftKey: Boolean = false) {
-        val jsCode = """
-            (function() {
-                function getCodeForKey(key) {
-                    const codeMap = {
-                        '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '4': 'Digit4', '5': 'Digit5',
-                        'r': 'KeyR', 'x': 'KeyX', 'h': 'KeyH', 'v': 'KeyV', 't': 'KeyT',
-                        '[': 'BracketLeft', '/': 'Slash', 'Escape': 'Escape'
-                    };
-                    return codeMap[key] || 'Unknown';
-                }
-                function getKeyCode(key) {
-                    const keyMap = {
-                        '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
-                        'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
-                        'h': 72, 'v': 86, 't': 84
-                    };
-                    return keyMap[key] || 0;
-                }
-                const event = new KeyboardEvent('keydown', {
-                    key: '$keyValue',
-                    code: getCodeForKey('$keyValue'),
-                    keyCode: getKeyCode('$keyValue'),
-                    which: getKeyCode('$keyValue'),
-                    altKey: $altKey,
-                    ctrlKey: $ctrlKey,
-                    shiftKey: $shiftKey,
-                    bubbles: true,
-                    cancelable: true
-                });
-                document.dispatchEvent(event);
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(jsCode, null)
     }
 
     /** Native implementation of the two globals enhancer.js depends on. */
@@ -520,10 +451,10 @@ class MainActivity : ComponentActivity() {
             val tag = when {
                 text.contains("FETCH") || text.contains("XHR") -> "🌐 NET"
                 text.contains("CLICK") -> "👆 CLICK"
-                text.contains("KEY") -> "⌨️  KEY"
+                text.contains("KEY") -> "⌨️ KEY"
                 text.contains("DOM") || text.contains("ATTR") -> "📄 DOM"
                 text.contains("STORAGE") -> "💾 STORE"
-                text.contains("SESSION") -> "▶️  SESSION"
+                text.contains("SESSION") -> "▶️ SESSION"
                 else -> "BW2"
             }
 
