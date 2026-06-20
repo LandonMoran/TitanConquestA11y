@@ -152,55 +152,9 @@ jobs:
           echo "Running gradle build..."
           ./gradlew assembleRelease --no-daemon 2>&1 | tail -100
 
-      - name: Upload APK to Release
+      - name: Publish Release
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Find APK
-          APK=$(find app/build/outputs -name "*.apk" -type f | head -1)
-          [ -z "$APK" ] && echo "ERROR: No APK found" && exit 1
-
-          echo "Found APK: $APK"
-          cp "$APK" release.apk
-
-          # Upload using API
-          TAG="${{ github.ref_name }}"
-          REPO="${{ github.repository }}"
-
-          # First try to get existing release
-          RELEASE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/$REPO/releases/tags/$TAG")
-
-          RELEASE_ID=$(echo "$RELEASE" | grep -o '"id": [0-9]*' | head -1 | grep -o '[0-9]*')
-
-          if [ -z "$RELEASE_ID" ]; then
-            # Create new release with APK
-            echo "Creating new release $TAG..."
-            curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/$REPO/releases" \
-              -d "{
-                \"tag_name\": \"$TAG\",
-                \"name\": \"TitanConquest A11y $TAG\",
-                \"body\": \"Accessible Android client for Titan Conquest\",
-                \"draft\": false,
-                \"prerelease\": true
-              }"
-
-            # Get the new release ID
-            RELEASE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-              "https://api.github.com/repos/$REPO/releases/tags/$TAG")
-            RELEASE_ID=$(echo "$RELEASE" | grep -o '"id": [0-9]*' | head -1 | grep -o '[0-9]*')
-          fi
-
-          echo "Release ID: $RELEASE_ID"
-
-          # Upload the APK
-          echo "Uploading APK..."
-          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=TitanConquestA11y-$TAG.apk" \
-            --data-binary @release.apk
-
-          echo ""
-          echo "✓ Release published"
+          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          [ -f "$APK" ] && gh release upload "${{ github.ref_name }}" "$APK" --clobber || echo "No APK"
