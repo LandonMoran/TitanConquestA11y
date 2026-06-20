@@ -162,6 +162,20 @@ class MainActivity : ComponentActivity() {
                     };
                   }
                 }
+
+                window.__audioCache = {};
+                window.__audioPreload = function() {
+                  try {
+                    for (var key in window.__bw2Audio) {
+                      var audio = new Audio();
+                      audio.src = window.__bw2Audio[key];
+                      audio.preload = 'auto';
+                      window.__audioCache[key] = audio;
+                    }
+                  } catch (e) {}
+                };
+
+                setTimeout(window.__audioPreload, 100);
               } catch (e) {}
             })();
         """.trimIndent()
@@ -194,6 +208,56 @@ class MainActivity : ComponentActivity() {
 
               removeChat();
               setInterval(removeChat, 500);
+            })();
+        """.trimIndent()
+
+        val combatAnimations = """
+            (function () {
+              if (window.__combatAnimLoaded) return;
+              window.__combatAnimLoaded = true;
+
+              var inCombat = false;
+              var styleEl = null;
+              var lastAttackTime = 0;
+
+              function enterCombat() {
+                if (inCombat) return;
+                inCombat = true;
+
+                if (!styleEl) {
+                  styleEl = document.createElement('style');
+                  styleEl.id = '__no-animations-combat';
+                  styleEl.textContent = '* { animation: none !important; transition: none !important; }';
+                  document.head.appendChild(styleEl);
+                }
+                window.__bw2Log && window.__bw2Log('info', 'COMBAT: Animations disabled');
+              }
+
+              function exitCombat() {
+                if (!inCombat) return;
+                inCombat = false;
+
+                if (styleEl && styleEl.parentNode) {
+                  styleEl.remove();
+                  styleEl = null;
+                }
+                window.__bw2Log && window.__bw2Log('info', 'COMBAT: Animations re-enabled');
+              }
+
+              var originalFetch = window.fetch;
+              window.fetch = function(url, options) {
+                if (url.includes('battle.php')) {
+                  lastAttackTime = Date.now();
+                  enterCombat();
+                }
+                return originalFetch.apply(this, arguments);
+              };
+
+              setInterval(function() {
+                if (inCombat && (Date.now() - lastAttackTime > 3500)) {
+                  exitCombat();
+                }
+              }, 1000);
             })();
         """.trimIndent()
 
@@ -235,7 +299,9 @@ class MainActivity : ComponentActivity() {
         view.evaluateJavascript(bootstrap) {
             view.evaluateJavascript(enhancerJs, null) { _ ->
                 view.evaluateJavascript(stripChat, null) { _ ->
-                    view.evaluateJavascript(victoryAutoReturn, null)
+                    view.evaluateJavascript(combatAnimations, null) { _ ->
+                        view.evaluateJavascript(victoryAutoReturn, null)
+                    }
                 }
             }
         }
