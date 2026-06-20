@@ -147,6 +147,14 @@ class MainActivity : ComponentActivity() {
         val bootstrap = """
             (function () {
               try {
+                // Add resource hints for faster loading
+                try {
+                  var link = document.createElement('link');
+                  link.rel = 'preconnect';
+                  link.href = 'https://titanconquest.com';
+                  document.head.appendChild(link);
+                } catch (e) {}
+
                 if (window.__bw2Native) {
                   if (!window.__bw2Audio) {
                     try { window.__bw2Audio = JSON.parse(window.__bw2Native.audioJson()); }
@@ -167,16 +175,32 @@ class MainActivity : ComponentActivity() {
                 window.__audioCache = {};
                 window.__audioPreload = function() {
                   try {
+                    var loadedCount = 0, failedCount = 0;
                     for (var key in window.__bw2Audio) {
-                      var audio = new Audio();
-                      audio.src = window.__bw2Audio[key];
-                      audio.preload = 'auto';
-                      window.__audioCache[key] = audio;
+                      (function(audioKey) {
+                        var audio = new Audio();
+                        audio.crossOrigin = 'anonymous';
+                        audio.src = window.__bw2Audio[audioKey];
+                        audio.preload = 'auto';
+
+                        audio.oncanplaythrough = function() {
+                          loadedCount++;
+                          window.__bw2Log('info', 'AUDIO_LOADED ' + audioKey);
+                        };
+
+                        audio.onerror = function() {
+                          failedCount++;
+                          window.__bw2Log('error', 'AUDIO_FAILED ' + audioKey + ' error=' + audio.error);
+                        };
+
+                        window.__audioCache[audioKey] = audio;
+                      })(key);
                     }
-                  } catch (e) {}
+                    window.__bw2Log('info', 'AUDIO_PRELOAD started for ' + Object.keys(window.__bw2Audio).length + ' files');
+                  } catch (e) { window.__bw2Log('error', 'AUDIO_PRELOAD error: ' + e.message); }
                 };
 
-                setTimeout(window.__audioPreload, 100);
+                setTimeout(window.__audioPreload, 50);
               } catch (e) {}
             })();
         """.trimIndent()
@@ -372,32 +396,40 @@ class MainActivity : ComponentActivity() {
                 const dir = '$direction';
                 const focused = document.activeElement;
 
-                // Strategy: find the currently visible page container first
-                const visiblePage = document.querySelector('.page-on-center, [class*="page-on"]');
-                const searchRoot = visiblePage || document;
+                // Find visible page container
+                const visiblePage = document.querySelector('.page-on-center');
+                if (!visiblePage) {
+                    window.__bw2Log('warn', 'NAV no visible page found');
+                    return;
+                }
 
-                // Try to find focusable/clickable elements in order of preference
-                let allItems = searchRoot.querySelectorAll('a.item-link');
-                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('a.link, a[href]');
-                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('li, [role="listitem"]');
-                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('button, [role="button"]');
-                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('.card, .item, .shop-item, [class*="menu"], [class*="action"]');
-                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('[onclick], [data-action], [data-page]');
+                // Build list of all clickable items (order matters)
+                let allItems = [];
+
+                // Priority 1: Direct .item-link elements
+                allItems = Array.from(visiblePage.querySelectorAll('a.item-link'));
+
+                // Priority 2: List items with links inside
                 if (allItems.length === 0) {
-                    // Find divs/elements that look clickable (have click handlers or are styled)
-                    const clickables = Array.from(searchRoot.querySelectorAll('div, span, p')).filter(el => {
-                        const style = window.getComputedStyle(el);
-                        const hasClickHandler = el.onclick || el.getAttribute('onclick');
-                        const hasDataAttrs = el.getAttribute('data-page') || el.getAttribute('data-action');
-                        return (style.cursor === 'pointer' || hasClickHandler || hasDataAttrs ||
-                                el.classList.toString().match(/click|btn|action|menu|item|link/i));
-                    });
-                    if (clickables.length > 0) allItems = clickables;
+                    const listItems = visiblePage.querySelectorAll('li');
+                    allItems = Array.from(listItems).filter(li => {
+                        const link = li.querySelector('a');
+                        return link && link.offsetHeight > 0; // Only visible items
+                    }).map(li => li.querySelector('a'));
+                }
+
+                // Priority 3: Any visible anchors with content
+                if (allItems.length === 0) {
+                    allItems = Array.from(visiblePage.querySelectorAll('a[href], a[role="button"]')).filter(a => a.offsetHeight > 0);
+                }
+
+                // Priority 4: Clickable buttons and divs
+                if (allItems.length === 0) {
+                    allItems = Array.from(visiblePage.querySelectorAll('button, [role="button"]')).filter(el => el.offsetHeight > 0);
                 }
 
                 if (allItems.length === 0) {
-                    // Fallback to window scroll if no items found
-                    window.scrollBy(0, dir === 'next' ? 300 : -300);
+                    window.__bw2Log('warn', 'NAV no items found on page');
                     return;
                 }
 
@@ -410,33 +442,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Calculate next index (wrap around)
+                // If nothing is focused, start at beginning/end based on direction
+                if (currentIndex === -1) {
+                    currentIndex = dir === 'next' ? -1 : 0;
+                }
+
+                // Calculate next index
                 let nextIndex = currentIndex + (dir === 'next' ? 1 : -1);
-                if (nextIndex < 0) nextIndex = allItems.length - 1;
-                if (nextIndex >= allItems.length) nextIndex = 0;
+                if (nextIndex < 0) nextIndex = 0;
+                if (nextIndex >= allItems.length) nextIndex = allItems.length - 1;
 
                 const nextItem = allItems[nextIndex];
                 if (nextItem) {
-                    // If it's not focusable, try to focus a child link or make it focusable
-                    if (nextItem.tagName !== 'A' && nextItem.tagName !== 'BUTTON') {
-                        const link = nextItem.querySelector('a, button, [role="button"]');
-                        if (link) {
-                            link.focus();
-                            link.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        } else {
-                            // Make the element focusable and style it
-                            if (!nextItem.hasAttribute('tabindex')) {
-                                nextItem.setAttribute('tabindex', '0');
-                            }
-                            nextItem.style.outline = '2px solid #FFD700';
-                            nextItem.focus();
-                            nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        }
-                    } else {
-                        nextItem.focus();
-                        nextItem.style.outline = '2px solid #FFD700';
-                        nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
+                    nextItem.focus();
+                    nextItem.style.outline = '2px solid #FFD700';
+                    nextItem.scrollIntoView({ behavior: 'auto', block: 'center' });
+                    window.__bw2Log('info', 'NAV focused item ' + nextIndex + ' of ' + allItems.length);
+                } else {
+                    window.__bw2Log('warn', 'NAV nextItem is null');
                 }
             })();
         """.trimIndent()

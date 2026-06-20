@@ -127,8 +127,13 @@
   // Walks up to 4 ancestors so we still log the link even when the user
   // clicks the inner icon/text.
   function installClickLogger() {
+    let lastClickTime = 0;
     document.addEventListener("click", function (e) {
       try {
+        const now = Date.now();
+        if (now - lastClickTime < 50) return; // Debounce rapid clicks (50ms)
+        lastClickTime = now;
+
         const path = [];
         let n = e.target;
         for (let i = 0; i < 4 && n && n.nodeType === 1; i++) {
@@ -137,15 +142,19 @@
         }
         dlog("info", "click trusted=" + e.isTrusted, "path:", path.join("  <-  "));
       } catch (err) { derr("click logger:", err); }
-    }, true);
+    }, { capture: true, passive: true });
 
     // Same for keydown on action keys so we can correlate keyboard nav with
     // missing/extra page loads.
+    let lastKeyTime = 0;
     document.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === "Tab" || e.key === " ") {
+        const now = Date.now();
+        if (now - lastKeyTime < 50) return; // Debounce rapid keys
+        lastKeyTime = now;
         try { dlog("info", `keydown ${e.key} on`, describeEl(e.target)); } catch (_) {}
       }
-    }, true);
+    }, { capture: true, passive: true });
   }
 
   // Wrap fetch / XHR so every server hit and its response status / size
@@ -225,7 +234,7 @@
     try {
       document.addEventListener("visibilitychange", () => {
         dlog("info", `PAGE_VISIBILITY ${document.visibilityState}`);
-      });
+      }, { passive: true });
     } catch (e) {}
 
     // Log all console output to capture errors, warnings, logs from the website
@@ -251,10 +260,10 @@
     try {
       window.addEventListener("beforeunload", () => {
         dlog("info", "PAGE_UNLOAD triggered");
-      });
+      }, { passive: true });
       window.addEventListener("load", () => {
         dlog("info", "PAGE_LOAD complete");
-      });
+      }, { passive: true });
       window.addEventListener("DOMContentLoaded", () => {
         dlog("info", "DOM_CONTENT_LOADED");
       });
