@@ -1,7 +1,11 @@
 package com.titanconquest.a11y
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.util.Base64
 import android.util.Log
 import android.view.KeyEvent
@@ -13,8 +17,12 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.BufferedWriter
+import java.text.SimpleDateFormat
+import java.util.*
 
 /**
  * Bloodwar 2 — Android client.
@@ -37,6 +45,14 @@ import java.io.ByteArrayOutputStream
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
+    private var logWriter: BufferedWriter? = null
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+    private val createDocumentLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+        if (uri != null) {
+            initializeLogging(uri)
+        }
+    }
 
     /** Built once from bundled assets: { "benemy.ogg": "data:audio/ogg;base64,..." }. */
     private val audioJson: String by lazy { buildAudioJson() }
@@ -49,6 +65,8 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        promptForLogFile()
 
         // Persistent cookies so the TQRPG session survives across launches —
         // the Electron app relies on Electron's persistent session for the same
@@ -96,6 +114,9 @@ class MainActivity : ComponentActivity() {
         }
 
         setContentView(webView)
+
+        Log.i("GameController", "App started - controller input listening active")
+        android.widget.Toast.makeText(this, "Controller ready", android.widget.Toast.LENGTH_SHORT).show()
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
@@ -187,6 +208,22 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         // Persist cookies (the session) to disk.
         CookieManager.getInstance().flush()
+        // Flush log file
+        try {
+            logWriter?.flush()
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error flushing log on pause", e)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Close log file
+        try {
+            logWriter?.close()
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error closing log", e)
+        }
     }
 
     @Suppress("MissingSuperCall", "OVERRIDE_DEPRECATION")
@@ -206,6 +243,7 @@ class MainActivity : ComponentActivity() {
         // LT (> 0.5) = "/" (go to next area)
         if (leftTrigger > 0.5f && !ltTriggerPressed) {
             ltTriggerPressed = true
+            showButtonToast("LT - Next Area")
             injectKeyEvent("/")
         } else if (leftTrigger <= 0.5f && ltTriggerPressed) {
             ltTriggerPressed = false
@@ -214,6 +252,7 @@ class MainActivity : ComponentActivity() {
         // RT (> 0.5) = "r" (use remedy)
         if (rightTrigger > 0.5f && !rtTriggerPressed) {
             rtTriggerPressed = true
+            showButtonToast("RT - Remedy")
             injectKeyEvent("r")
         } else if (rightTrigger <= 0.5f && rtTriggerPressed) {
             rtTriggerPressed = false
@@ -225,47 +264,61 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_BUTTON_A -> {
+                showButtonToast("A - Attack")
                 injectKeyEvent("1")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_B -> {
+                showButtonToast("B - Special")
                 injectKeyEvent("2")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_X -> {
+                showButtonToast("X - Heavy")
                 injectKeyEvent("3")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_Y -> {
+                showButtonToast("Y - Super")
                 injectKeyEvent("4")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_L1 -> {
+                showButtonToast("LB - Cover")
                 injectKeyEvent("5")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> {
+                showButtonToast("RB - Look Around")
                 injectKeyEvent("[")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_START -> {
+                showButtonToast("Start - Home")
                 injectKeyEventWithModifier("h", altKey = true)
                 true
             }
             KeyEvent.KEYCODE_BUTTON_SELECT -> {
+                showButtonToast("Select - Escape")
                 injectKeyEvent("Escape")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_THUMBL -> {
+                showButtonToast("LS - Stats")
                 injectKeyEvent("x")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_THUMBR -> {
+                showButtonToast("RS - Skip Victory")
                 injectKeyEventWithModifier("v", altKey = true)
                 true
             }
             else -> super.onKeyDown(keyCode, event)
         }
+    }
+
+    private fun showButtonToast(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private var ltTriggerPressed = false
@@ -331,6 +384,63 @@ class MainActivity : ComponentActivity() {
         webView.evaluateJavascript(jsCode, null)
     }
 
+    private fun promptForLogFile() {
+        AlertDialog.Builder(this)
+            .setTitle("Game Activity Logging")
+            .setMessage("Save game activity log to file? This will capture all network, UI, and game interactions.")
+            .setPositiveButton("Yes, Save Log") { _, _ ->
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                createDocumentLauncher.launch("titanconquest_$timestamp.log")
+            }
+            .setNegativeButton("No Logging") { _, _ ->
+                writeLog("=== Logging disabled ===")
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun initializeLogging(uri: Uri) {
+        try {
+            val outputStream = contentResolver.openOutputStream(uri) ?: return
+            logWriter = outputStream.bufferedWriter()
+
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+            logWriter?.write("================================================================================\n")
+            logWriter?.write("GAME SESSION STARTED: $timestamp\n")
+            logWriter?.write("================================================================================\n")
+            logWriter?.flush()
+
+            android.widget.Toast.makeText(
+                this,
+                "✓ Logging started",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+
+            writeLog("Logging initialized successfully")
+        } catch (e: Exception) {
+            Log.e("Logging", "Failed to initialize log file", e)
+            android.widget.Toast.makeText(this, "Log error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun writeLog(message: String) {
+        try {
+            val timestamp = dateFormat.format(Date())
+            val logLine = "[$timestamp] $message"
+
+            if (logWriter != null) {
+                synchronized(logWriter!!) {
+                    logWriter?.write("$logLine\n")
+                    logWriter?.flush()
+                }
+            }
+
+            Log.d("GameLog", message)
+        } catch (e: Exception) {
+            Log.e("GameLog", "Error writing to log: ${e.message}", e)
+        }
+    }
+
     /** Native implementation of the two globals enhancer.js depends on. */
     private inner class NativeBridge {
         @JavascriptInterface
@@ -338,16 +448,25 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun log(level: String, text: String) {
-            Log.println(
-                when (level.lowercase()) {
-                    "error" -> Log.ERROR
-                    "warn" -> Log.WARN
-                    "info" -> Log.INFO
-                    else -> Log.DEBUG
-                },
-                "BW2",
-                text
-            )
+            val tag = when {
+                text.contains("FETCH") || text.contains("XHR") -> "🌐 NET"
+                text.contains("CLICK") -> "👆 CLICK"
+                text.contains("KEY") -> "⌨️ KEY"
+                text.contains("DOM") || text.contains("ATTR") -> "📄 DOM"
+                text.contains("STORAGE") -> "💾 STORE"
+                text.contains("SESSION") -> "▶️ SESSION"
+                else -> "BW2"
+            }
+
+            val priority = when (level.lowercase()) {
+                "error" -> Log.ERROR
+                "warn" -> Log.WARN
+                "info" -> Log.INFO
+                else -> Log.DEBUG
+            }
+
+            Log.println(priority, tag, text)
+            writeLog("[$tag] $text")
         }
     }
 }
