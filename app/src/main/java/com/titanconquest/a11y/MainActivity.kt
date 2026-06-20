@@ -371,18 +371,25 @@ class MainActivity : ComponentActivity() {
                 const dir = '$direction';
                 const focused = document.activeElement;
 
+                // Strategy: find the currently visible page container first
+                const visiblePage = document.querySelector('.page-on-center, [class*="page-on"]');
+                const searchRoot = visiblePage || document;
+
                 // Try to find focusable/clickable elements in order of preference
-                let allItems = document.querySelectorAll('a.item-link');
-                if (allItems.length === 0) allItems = document.querySelectorAll('a.link, a[href]');
-                if (allItems.length === 0) allItems = document.querySelectorAll('li, [role="listitem"]');
-                if (allItems.length === 0) allItems = document.querySelectorAll('button, [role="button"]');
-                if (allItems.length === 0) allItems = document.querySelectorAll('.card, .item, .shop-item');
-                if (allItems.length === 0) allItems = document.querySelectorAll('[onclick], [data-action]');
+                let allItems = searchRoot.querySelectorAll('a.item-link');
+                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('a.link, a[href]');
+                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('li, [role="listitem"]');
+                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('button, [role="button"]');
+                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('.card, .item, .shop-item, [class*="menu"], [class*="action"]');
+                if (allItems.length === 0) allItems = searchRoot.querySelectorAll('[onclick], [data-action], [data-page]');
                 if (allItems.length === 0) {
-                    // Last resort: find all elements with specific classes that look clickable
-                    const clickables = Array.from(document.querySelectorAll('*')).filter(el => {
+                    // Find divs/elements that look clickable (have click handlers or are styled)
+                    const clickables = Array.from(searchRoot.querySelectorAll('div, span, p')).filter(el => {
                         const style = window.getComputedStyle(el);
-                        return (style.cursor === 'pointer' || el.classList.toString().includes('click') || el.classList.toString().includes('btn'));
+                        const hasClickHandler = el.onclick || el.getAttribute('onclick');
+                        const hasDataAttrs = el.getAttribute('data-page') || el.getAttribute('data-action');
+                        return (style.cursor === 'pointer' || hasClickHandler || hasDataAttrs ||
+                                el.classList.toString().match(/click|btn|action|menu|item|link/i));
                     });
                     if (clickables.length > 0) allItems = clickables;
                 }
@@ -416,15 +423,17 @@ class MainActivity : ComponentActivity() {
                             link.focus();
                             link.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         } else {
-                            // Make the element focusable
+                            // Make the element focusable and style it
                             if (!nextItem.hasAttribute('tabindex')) {
                                 nextItem.setAttribute('tabindex', '0');
                             }
+                            nextItem.style.outline = '2px solid #FFD700';
                             nextItem.focus();
                             nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         }
                     } else {
                         nextItem.focus();
+                        nextItem.style.outline = '2px solid #FFD700';
                         nextItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     }
                 }
