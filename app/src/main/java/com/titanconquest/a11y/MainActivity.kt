@@ -197,7 +197,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onGenericMotionEvent(event: MotionEvent?): Boolean {
         if (event == null) return super.onGenericMotionEvent(event)
-        if ((event.source and MotionEvent.TOOL_TYPE_UNKNOWN) == 0) return super.onGenericMotionEvent(event)
 
         // Handle analog stick triggers (LT/RT)
         val leftTrigger = getCenteredAxis(event, MotionEvent.AXIS_LTRIGGER)
@@ -281,24 +280,32 @@ class MainActivity : ComponentActivity() {
     private fun injectKeyEvent(keyValue: String) {
         val jsCode = """
             (function() {
+                function getCodeForKey(key) {
+                    const codeMap = {
+                        '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '4': 'Digit4', '5': 'Digit5',
+                        'r': 'KeyR', 'x': 'KeyX', 'h': 'KeyH',
+                        '[': 'BracketLeft', '/': 'Slash', 'Escape': 'Escape'
+                    };
+                    return codeMap[key] || 'Unknown';
+                }
+                function getKeyCode(key) {
+                    const keyMap = {
+                        '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
+                        'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
+                        'h': 72
+                    };
+                    return keyMap[key] || 0;
+                }
                 const event = new KeyboardEvent('keydown', {
                     key: '$keyValue',
-                    code: 'Key${keyValue.uppercase()}',
+                    code: getCodeForKey('$keyValue'),
                     keyCode: getKeyCode('$keyValue'),
+                    which: getKeyCode('$keyValue'),
                     bubbles: true,
                     cancelable: true
                 });
                 document.dispatchEvent(event);
             })();
-
-            function getKeyCode(key) {
-                const keyMap = {
-                    '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
-                    'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
-                    'h': 72
-                };
-                return keyMap[key] || 0;
-            }
         """.trimIndent()
         webView.evaluateJavascript(jsCode, null)
     }
@@ -306,10 +313,27 @@ class MainActivity : ComponentActivity() {
     private fun injectKeyEventWithModifier(keyValue: String, altKey: Boolean = false, ctrlKey: Boolean = false, shiftKey: Boolean = false) {
         val jsCode = """
             (function() {
+                function getCodeForKey(key) {
+                    const codeMap = {
+                        '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '4': 'Digit4', '5': 'Digit5',
+                        'r': 'KeyR', 'x': 'KeyX', 'h': 'KeyH', 'v': 'KeyV', 't': 'KeyT',
+                        '[': 'BracketLeft', '/': 'Slash', 'Escape': 'Escape'
+                    };
+                    return codeMap[key] || 'Unknown';
+                }
+                function getKeyCode(key) {
+                    const keyMap = {
+                        '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
+                        'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
+                        'h': 72, 'v': 86, 't': 84
+                    };
+                    return keyMap[key] || 0;
+                }
                 const event = new KeyboardEvent('keydown', {
                     key: '$keyValue',
-                    code: 'Key${keyValue.uppercase()}',
+                    code: getCodeForKey('$keyValue'),
                     keyCode: getKeyCode('$keyValue'),
+                    which: getKeyCode('$keyValue'),
                     altKey: $altKey,
                     ctrlKey: $ctrlKey,
                     shiftKey: $shiftKey,
@@ -318,15 +342,6 @@ class MainActivity : ComponentActivity() {
                 });
                 document.dispatchEvent(event);
             })();
-
-            function getKeyCode(key) {
-                const keyMap = {
-                    '1': 49, '2': 50, '3': 51, '4': 52, '5': 53,
-                    'r': 82, 'Escape': 27, '[': 219, '/': 191, 'x': 88,
-                    'h': 72, 'v': 86, 't': 84
-                };
-                return keyMap[key] || 0;
-            }
         """.trimIndent()
         webView.evaluateJavascript(jsCode, null)
     }
