@@ -195,6 +195,63 @@
     } catch (e) { derr("install xhr logger:", e); }
   }
 
+  // Comprehensive resource and navigation logging - captures ALL network activity
+  // including HTML, PHP, JS, CSS, images, fonts, etc. with full details
+  function installComprehensiveNetworkLogger() {
+    // Log all resource loads via Performance API
+    try {
+      const observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.entryType === "resource") {
+            dlog("info", `RESOURCE ${entry.initiatorType.toUpperCase()} ${entry.name} (${Math.round(entry.duration)}ms, ${Math.round(entry.transferSize || 0)}B)`);
+          } else if (entry.entryType === "navigation") {
+            dlog("info", `NAVIGATION ${entry.name} type=${entry.type} (${Math.round(entry.duration)}ms, ${Math.round(entry.transferSize || 0)}B)`);
+          }
+        }
+      });
+      observer.observe({ entryTypes: ["resource", "navigation"] });
+    } catch (e) { derr("install perf observer:", e); }
+
+    // Log page visibility changes (page hide/show)
+    try {
+      document.addEventListener("visibilitychange", () => {
+        dlog("info", `PAGE_VISIBILITY ${document.visibilityState}`);
+      });
+    } catch (e) {}
+
+    // Log all console output to capture errors, warnings, logs from the website
+    try {
+      const origLog = console.log;
+      const origWarn = console.warn;
+      const origError = console.error;
+      console.log = function (...args) {
+        try { dlog("info", "CONSOLE_LOG", ...args); } catch (_) {}
+        return origLog.apply(console, arguments);
+      };
+      console.warn = function (...args) {
+        try { dwarn("CONSOLE_WARN", ...args); } catch (_) {}
+        return origWarn.apply(console, arguments);
+      };
+      console.error = function (...args) {
+        try { derr("CONSOLE_ERROR", ...args); } catch (_) {}
+        return origError.apply(console, arguments);
+      };
+    } catch (e) { derr("install console logger:", e); }
+
+    // Log page navigation/unload
+    try {
+      window.addEventListener("beforeunload", () => {
+        dlog("info", "PAGE_UNLOAD triggered");
+      });
+      window.addEventListener("load", () => {
+        dlog("info", "PAGE_LOAD complete");
+      });
+      window.addEventListener("DOMContentLoaded", () => {
+        dlog("info", "DOM_CONTENT_LOADED");
+      });
+    } catch (e) {}
+  }
+
   // =========================================================================
   //  UTILITY: Live Region for Screen Reader Announcements
   // =========================================================================
@@ -3737,6 +3794,7 @@
     safeRun("installGlobalErrorTraps", () => installGlobalErrorTraps());
     safeRun("installClickLogger", () => installClickLogger());
     safeRun("installNetworkLogger", () => installNetworkLogger());
+    safeRun("installComprehensiveNetworkLogger", () => installComprehensiveNetworkLogger());
     dlog("info", `enhancer init build=${BW2_BUILD_TAG} url=${location.href} ua=${navigator.userAgent}`);
 
     // Performance modules (analytics blocked at Electron network level)
