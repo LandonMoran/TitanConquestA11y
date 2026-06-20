@@ -138,8 +138,13 @@ jobs:
             echo "ERROR: RELEASE_KEYSTORE_B64 secret not set. Cannot build signed release."
             exit 1
           fi
+          echo "Keystore secret length: ${#KEYSTORE_B64}"
           echo "$KEYSTORE_B64" | base64 -d > app/titanconquest.jks
+          echo "Keystore file created:"
           ls -lh app/titanconquest.jks
+          echo "Verifying keystore:"
+          file app/titanconquest.jks
+          keytool -list -keystore app/titanconquest.jks -storepass titanconquest123 -noprompt | head -5
 
       - name: Build Release APK
         env:
@@ -148,6 +153,13 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Check APK Output
+        run: |
+          echo "Looking for APK files:"
+          find app/build/outputs -name "*.apk" -type f
+          echo "Release APK details:"
+          ls -lh app/build/outputs/apk/release/ 2>/dev/null || echo "No release directory found"
 
       - name: Rename Release APK
         run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
