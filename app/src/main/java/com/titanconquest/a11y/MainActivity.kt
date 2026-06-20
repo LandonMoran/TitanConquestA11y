@@ -97,37 +97,12 @@ class MainActivity : ComponentActivity() {
 
         setContentView(webView)
 
-        // Detect connected game controllers
-        detectControllers()
+        Log.i("GameController", "App started - controller input listening active")
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
         } else {
             webView.loadUrl("https://titanconquest.com/")
-        }
-    }
-
-    private fun detectControllers() {
-        val devices = android.view.InputDevice.getDeviceIds()
-        val gamepads = devices.mapNotNull { id ->
-            val device = android.view.InputDevice.getDevice(id)
-            if (device != null) {
-                val sources = device.sources
-                if ((sources and android.view.InputDevice.SOURCE_GAMEPAD) != 0 ||
-                    (sources and android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
-                    device.name
-                } else {
-                    null
-                }
-            } else {
-                null
-            }
-        }
-
-        if (gamepads.isNotEmpty()) {
-            Log.i("GameController", "Controllers detected: ${gamepads.joinToString(", ")}")
-        } else {
-            Log.w("GameController", "No game controllers detected")
         }
     }
 
@@ -232,21 +207,17 @@ class MainActivity : ComponentActivity() {
         // LT (> 0.5) = "/" (go to next area)
         if (leftTrigger > 0.5f && !ltTriggerPressed) {
             ltTriggerPressed = true
-            Log.d("GameController", "LT trigger pressed (value: $leftTrigger)")
             injectKeyEvent("/")
         } else if (leftTrigger <= 0.5f && ltTriggerPressed) {
             ltTriggerPressed = false
-            Log.d("GameController", "LT trigger released")
         }
 
         // RT (> 0.5) = "r" (use remedy)
         if (rightTrigger > 0.5f && !rtTriggerPressed) {
             rtTriggerPressed = true
-            Log.d("GameController", "RT trigger pressed (value: $rightTrigger)")
             injectKeyEvent("r")
         } else if (rightTrigger <= 0.5f && rtTriggerPressed) {
             rtTriggerPressed = false
-            Log.d("GameController", "RT trigger released")
         }
 
         return super.onGenericMotionEvent(event)
@@ -255,52 +226,43 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_BUTTON_A -> {
-                Log.d("GameController", "A button pressed")
+                Log.d("GameController", "Button A pressed")
                 injectKeyEvent("1")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_B -> {
-                Log.d("GameController", "B button pressed")
                 injectKeyEvent("2")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_X -> {
-                Log.d("GameController", "X button pressed")
                 injectKeyEvent("3")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_Y -> {
-                Log.d("GameController", "Y button pressed")
                 injectKeyEvent("4")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_L1 -> {
-                Log.d("GameController", "LB pressed")
                 injectKeyEvent("5")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> {
-                Log.d("GameController", "RB pressed")
                 injectKeyEvent("[")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_START -> {
-                Log.d("GameController", "Start pressed")
                 injectKeyEventWithModifier("h", altKey = true)
                 true
             }
             KeyEvent.KEYCODE_BUTTON_SELECT -> {
-                Log.d("GameController", "Select pressed")
                 injectKeyEvent("Escape")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_THUMBL -> {
-                Log.d("GameController", "Left stick pressed")
                 injectKeyEvent("x")
                 true
             }
             KeyEvent.KEYCODE_BUTTON_THUMBR -> {
-                Log.d("GameController", "Right stick pressed")
                 injectKeyEventWithModifier("v", altKey = true)
                 true
             }
