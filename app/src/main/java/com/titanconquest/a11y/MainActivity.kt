@@ -211,74 +211,9 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
 
-        val combatAnimations = """
-            (function () {
-              if (window.__combatAnimLoaded) return;
-              window.__combatAnimLoaded = true;
-
-              var styleEl = document.createElement('style');
-              styleEl.id = '__animations-control';
-              styleEl.textContent = '.animdisabled * { animation: none !important; transition: none !important; }';
-              document.head.appendChild(styleEl);
-
-              var observer = new MutationObserver(function(mutations) {
-                try {
-                  mutations.forEach(function(m) {
-                    if (m.target.textContent && m.target.textContent.includes('Battle')) {
-                      if (!document.body.classList.contains('animdisabled')) {
-                        document.body.classList.add('animdisabled');
-                      }
-                    }
-                  });
-                } catch (e) {}
-              });
-
-              observer.observe(document.body, { childList: true, subtree: true });
-            })();
-        """.trimIndent()
-
-        val victoryAutoReturn = """
-            (function () {
-              if (window.__victoryDetectorLoaded) return;
-              window.__victoryDetectorLoaded = true;
-
-              var lastBattleState = null;
-
-              function checkVictory() {
-                try {
-                  var battleTotals = document.querySelector('.battle-total, [class*="battle"], [class*="victory"]');
-                  var patrolBtn = document.querySelector('a[class*="patrollink"]');
-
-                  if (patrolBtn && battleTotals) {
-                    var battleHtml = battleTotals.textContent || '';
-                    var isVictory = battleHtml.toLowerCase().includes('victory') ||
-                                   battleHtml.toLowerCase().includes('won') ||
-                                   !battleHtml.toLowerCase().includes('death');
-                    var isDead = battleHtml.toLowerCase().includes('death') ||
-                                battleHtml.toLowerCase().includes('died');
-
-                    if (isVictory && !isDead && lastBattleState !== 'returned') {
-                      lastBattleState = 'returned';
-                      window.__bw2Log && window.__bw2Log('info', 'AUTO-RETURN: Green victory detected, returning to patrol');
-                      setTimeout(function() {
-                        patrolBtn.click();
-                      }, 500);
-                    }
-                  }
-                } catch (e) {}
-              }
-
-              setInterval(checkVictory, 300);
-            })();
-        """.trimIndent()
-
         view.evaluateJavascript(bootstrap) {
             view.evaluateJavascript(enhancerJs, null) { _ ->
-                view.evaluateJavascript(stripChat, null) { _ ->
-                    view.evaluateJavascript(combatAnimations, null) { _ ->
-                        view.evaluateJavascript(victoryAutoReturn, null)
-                    }
-                }
+                view.evaluateJavascript(stripChat, null)
             }
         }
     }
