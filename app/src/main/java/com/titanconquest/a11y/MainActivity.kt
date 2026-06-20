@@ -330,9 +330,9 @@ class MainActivity : ComponentActivity() {
         """.trimIndent()
 
         view.evaluateJavascript(bootstrap) {
-            view.evaluateJavascript(audioOptimizer, null) { _ ->
-                view.evaluateJavascript(enhancerJs, null) { _ ->
-                    view.evaluateJavascript(stripChat, null) { _ ->
+            view.evaluateJavascript(audioOptimizer) { _ ->
+                view.evaluateJavascript(enhancerJs) { _ ->
+                    view.evaluateJavascript(stripChat) { _ ->
                         view.evaluateJavascript(hardvenVictorySkip, null)
                     }
                 }
