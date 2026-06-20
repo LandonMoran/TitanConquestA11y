@@ -310,8 +310,12 @@ class MainActivity : ComponentActivity() {
 
                     if (patrolLink) {
                       try {
-                        patrolLink.focus();
-                        patrolLink.click();
+                        var href = patrolLink.getAttribute('href');
+                        if (href && href !== 'x') {
+                          window.location.href = href;
+                        } else {
+                          patrolLink.click();
+                        }
                         window.__bw2Log && window.__bw2Log('info', 'VICTORY-HARDENED: Clicked patrol link');
                       } catch (e) {
                         window.__bw2Log && window.__bw2Log('warn', 'VICTORY-HARDENED: Failed to click: ' + e.message);
