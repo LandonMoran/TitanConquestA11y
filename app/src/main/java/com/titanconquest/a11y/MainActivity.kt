@@ -216,48 +216,24 @@ class MainActivity : ComponentActivity() {
               if (window.__combatAnimLoaded) return;
               window.__combatAnimLoaded = true;
 
-              var inCombat = false;
-              var styleEl = null;
-              var lastAttackTime = 0;
+              var styleEl = document.createElement('style');
+              styleEl.id = '__animations-control';
+              styleEl.textContent = '.animdisabled * { animation: none !important; transition: none !important; }';
+              document.head.appendChild(styleEl);
 
-              function enterCombat() {
-                if (inCombat) return;
-                inCombat = true;
+              var observer = new MutationObserver(function(mutations) {
+                try {
+                  mutations.forEach(function(m) {
+                    if (m.target.textContent && m.target.textContent.includes('Battle')) {
+                      if (!document.body.classList.contains('animdisabled')) {
+                        document.body.classList.add('animdisabled');
+                      }
+                    }
+                  });
+                } catch (e) {}
+              });
 
-                if (!styleEl) {
-                  styleEl = document.createElement('style');
-                  styleEl.id = '__no-animations-combat';
-                  styleEl.textContent = '* { animation: none !important; transition: none !important; }';
-                  document.head.appendChild(styleEl);
-                }
-                window.__bw2Log && window.__bw2Log('info', 'COMBAT: Animations disabled');
-              }
-
-              function exitCombat() {
-                if (!inCombat) return;
-                inCombat = false;
-
-                if (styleEl && styleEl.parentNode) {
-                  styleEl.remove();
-                  styleEl = null;
-                }
-                window.__bw2Log && window.__bw2Log('info', 'COMBAT: Animations re-enabled');
-              }
-
-              var originalFetch = window.fetch;
-              window.fetch = function(url, options) {
-                if (url.includes('battle.php')) {
-                  lastAttackTime = Date.now();
-                  enterCombat();
-                }
-                return originalFetch.apply(this, arguments);
-              };
-
-              setInterval(function() {
-                if (inCombat && (Date.now() - lastAttackTime > 3500)) {
-                  exitCombat();
-                }
-              }, 1000);
+              observer.observe(document.body, { childList: true, subtree: true });
             })();
         """.trimIndent()
 
