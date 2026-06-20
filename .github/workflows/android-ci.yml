@@ -152,25 +152,29 @@ jobs:
           echo "Running gradle build..."
           ./gradlew assembleRelease --no-daemon 2>&1 | tail -100
 
-      - name: Prepare Release APK
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Searching for APK..."
+          # Find and copy the APK
           for apk in app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app*.apk; do
             if [ -f "$apk" ]; then
-              echo "✓ Found: $apk"
-              cp "$apk" "release.apk"
-              ls -lh release.apk
+              echo "✓ Found APK: $apk"
+              cp "$apk" "TitanConquestA11y.apk"
+              ls -lh TitanConquestA11y.apk
+
+              # Create or update the release
+              TAG="${{ github.ref_name }}"
+              if gh release view "$TAG" > /dev/null 2>&1; then
+                echo "✓ Release $TAG already exists, uploading APK..."
+                gh release upload "$TAG" TitanConquestA11y.apk --clobber
+              else
+                echo "✓ Creating release $TAG..."
+                gh release create "$TAG" TitanConquestA11y.apk \
+                  --title "TitanConquest A11y $TAG" \
+                  --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
+                  --prerelease
+              fi
               break
             fi
           done
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          files: release.apk
-          body: "Accessible Android client for Titan Conquest - v${{ github.ref_name }}"
-          prerelease: true
-          draft: false
