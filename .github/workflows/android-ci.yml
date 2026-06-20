@@ -114,6 +114,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug Info
+        run: |
+          echo "GitHub context:"
+          echo "  ref: ${{ github.ref }}"
+          echo "  ref_name: ${{ github.ref_name }}"
+          echo "  workspace: ${{ github.workspace }}"
+          echo ""
+          echo "Event trigger: ${{ github.event_name }}"
+          echo "Tag condition check: startsWith('${{ github.ref }}', 'refs/tags/v') = ${{ startsWith(github.ref, 'refs/tags/v') }}"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -135,16 +145,11 @@ jobs:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: |
           if [ -z "$KEYSTORE_B64" ]; then
-            echo "ERROR: RELEASE_KEYSTORE_B64 secret not set. Cannot build signed release."
+            echo "ERROR: RELEASE_KEYSTORE_B64 secret not set."
             exit 1
           fi
-          echo "Keystore secret length: ${#KEYSTORE_B64}"
           echo "$KEYSTORE_B64" | base64 -d > app/titanconquest.jks
-          echo "Keystore file created:"
           ls -lh app/titanconquest.jks
-          echo "Verifying keystore:"
-          file app/titanconquest.jks
-          keytool -list -keystore app/titanconquest.jks -storepass titanconquest123 -noprompt | head -5
 
       - name: Build Release APK
         env:
@@ -154,38 +159,17 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace --no-daemon
 
-      - name: Check APK Output
+      - name: Rename and verify APK
         run: |
-          echo "Looking for APK files:"
-          find app/build/outputs -name "*.apk" -type f
-          echo "Release APK details:"
-          ls -lh app/build/outputs/apk/release/ 2>/dev/null || echo "No release directory found"
-
-      - name: Rename Release APK
-        run: cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
-
-      - name: Verify APK is ready
-        run: |
-          echo "Checking if APK exists before release..."
-          if [ ! -f TitanConquestA11y-release.apk ]; then
-            echo "ERROR: TitanConquestA11y-release.apk not found!"
-            ls -lh *.apk 2>/dev/null || echo "No APK files in current directory"
-            exit 1
-          fi
-          echo "✓ APK ready: $(ls -lh TitanConquestA11y-release.apk)"
+          cp app/build/outputs/apk/release/app-release.apk TitanConquestA11y-release.apk
+          ls -lh TitanConquestA11y-release.apk
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -x
-          TAG="${{ github.ref_name }}"
-          echo "Creating release for tag: $TAG"
-
-          gh release create "$TAG" \
-            --title "TitanConquest A11y $TAG" \
-            --notes "An accessible Android client for Titan Conquest, built with full TalkBack support. Download the APK and install via ADB or sideload." \
+          gh release create "${{ github.ref_name }}" \
+            --title "TitanConquest A11y ${{ github.ref_name }}" \
+            --notes "Accessible Android client for Titan Conquest with full TalkBack support." \
             --prerelease \
             TitanConquestA11y-release.apk
-
-          echo "✓ Release created successfully"
