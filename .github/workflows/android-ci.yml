@@ -167,17 +167,16 @@ jobs:
             fi
           done
 
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-apk-${{ github.ref_name }}
-          path: TitanConquestA11y-*.apk
-          retention-days: 30
+      - name: List Files Before Release
+        run: |
+          echo "Files in workspace:"
+          ls -lh ${{ github.workspace }}/TitanConquestA11y-*.apk 2>/dev/null || echo "No matching files found"
+          ls -lh *.apk 2>/dev/null || echo "No APK files in current directory"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: TitanConquestA11y-*.apk
+          files: T{{ github.workspace }}/TitanConquestA11y-${{ github.ref_name }}.apk
           body: "Accessible Android client for Titan Conquest with full TalkBack support."
           prerelease: true
